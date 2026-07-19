@@ -1,0 +1,16 @@
+build/
+Testing/
+data/
+certs/
+*.db
+*.sqlite3
+*.sqlite3-*
+cmake-build-*/
+compile_commands.json
+.cache/
+*.o
+*.a
+*.so
+*.dylib
+*.dll
+*.exe

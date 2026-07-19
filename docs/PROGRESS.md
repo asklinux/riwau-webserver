@@ -948,6 +948,15 @@ Result:
 - `make status` and `make status-https` reported no background server running.
 - `git status --short --branch` still fails because this directory is not a Git repository.
 
+GitHub publishing update:
+
+- Target GitHub repository: `https://github.com/asklinux/riwau-webserver`.
+- Remote default branch is `main`.
+- Existing remote contained a GPL-3.0 `LICENSE`; it was preserved and copied into the local workspace.
+- Project source was synced into a temporary clone of the remote so the existing remote history was preserved.
+- Pushed commit `903dadc` (`Add Rimau Web Server implementation`) to `main`.
+- The original local workspace `/home/data/tunnelbiz/rimauwebserver` still was not initialized as a Git repository after this push. Future work should either initialize it carefully against the remote or use a fresh clone. Needs verification.
+
 HTTP/2 TLS ALPN `h2` request-serving update:
 
 - SQLite config validation now allows `tls_alpn_protocols` to contain `h2` when HTTP/2 is enabled for TLS serving, and still rejects `h3` until HTTP/3 live serving exists.

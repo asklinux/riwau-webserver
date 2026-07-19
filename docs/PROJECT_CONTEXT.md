@@ -79,6 +79,7 @@ Not present:
 .
 |-- AGENTS.md
 |-- CMakeLists.txt
+|-- LICENSE
 |-- Makefile
 |-- README.md
 |-- docs/
@@ -295,6 +296,10 @@ cmake -S . -B build
 cmake --build build
 ./build/rimau-server --database data/rimau.sqlite3
 ```
+
+License file exists as GPL-3.0 from the target GitHub repository. Needs verification that GPL-3.0 is the intended project license.
+
+GitHub remote: `https://github.com/asklinux/riwau-webserver`. Current source was pushed to remote `main` on 2026-07-20. The local working directory used by Codex at `/home/data/tunnelbiz/rimauwebserver` still was not initialized as a Git repository at that time; future sessions should either initialize it carefully against the remote or work from a fresh clone. Needs verification.
 
 Production deployment, service manager, packaging, container, TLS certificate handling, log rotation, dan privilege dropping: Needs verification.
 

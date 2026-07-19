@@ -3,6 +3,7 @@
 ## P0 - Foundation
 
 - Initialize Git repository if project owner wants version control here. Needs verification.
+- Align the current local workspace with `https://github.com/asklinux/riwau-webserver` if future work should push directly from this directory instead of using a temporary clone. Needs verification.
 - Add parser tests for malformed request lines, duplicate headers, long headers, and path traversal cases.
 - Add response tests for GET, HEAD, 404, 403, 405, and MIME types.
 - Add SQLite schema migration/version table.
@@ -10,7 +11,7 @@
 - Add CLI integration tests for `--protocols` with SQLite protocol flags.
 - Add CI workflow after Git hosting is chosen. Needs verification.
 - Decide coding style and formatter. Needs verification.
-- Decide license. Needs verification.
+- Confirm that the existing GitHub repository `LICENSE` GPL-3.0 is the intended license for Rimau Web Server. Needs verification.
 
 ## P1 - HTTP/1.1 Completion
 

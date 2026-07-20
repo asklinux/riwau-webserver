@@ -1015,4 +1015,21 @@ The SNI callback already had code paths for exact and simple wildcard certificat
 
 Consequence:
 
-Rimau now has automated coverage for multi-certificate SNI selection. This does not complete production certificate lifecycle management, OCSP stapling, renewal automation, permission policy, or rollback guidance; those remain separate Phase 3 work.
+Rimau now has automated coverage for multi-certificate SNI selection. This did not itself complete certificate lifecycle management; later Phase 3 work added production certificate path/permission/reload/rotation/rollback guidance in `docs/plans/022-production-certificate-management.md` and ADR-0039 explicitly deferred OCSP stapling. ACME issuance/renewal automation remains future work.
+
+## ADR-0039: Defer OCSP Stapling In Phase 3
+
+- Date: 2026-07-20
+- Status: Accepted
+
+Decision:
+
+Do not implement OCSP stapling or add `tls_ocsp_*` SQLite config keys in Phase 3.
+
+Reason:
+
+OCSP stapling needs a complete certificate-chain and issuer model, responder URL handling, fetch/cache/refresh logic, time validation, failure policy, SIGHUP reload behavior, privacy and outbound-network policy, and real-client tests. The current repository has no accepted source dependency, cache design, update process, or production policy for those pieces. Adding placeholder keys would make the server appear more complete than it is.
+
+Consequence:
+
+Rimau does not staple OCSP responses. Operators that require OCSP stapling should terminate TLS in a component that supports it, or rely on short-lived certificates and external certificate monitoring until a future ADR accepts a full OCSP implementation plan. Production certificate management guidance is documented in `docs/plans/022-production-certificate-management.md`, but OCSP remains unsupported there as well.

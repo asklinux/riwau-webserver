@@ -47,6 +47,7 @@ Implemented:
 - Bundled Linux UAPI headers daripada Linux kernel source 6.18.7 untuk glibc
 - Bundled GNU glibc 2.43 source build untuk Linux x86_64 static sysroot
 - Fully static `rimau-server` link pada Linux x86_64 GNU/Clang melalui bundled glibc sysroot apabila `RIMAU_FULLY_STATIC_SERVER=ON` dan `RIMAU_USE_BUNDLED_GLIBC=ON`
+- Automated CTest `rimau_static_elf_checks` untuk default fully static build; test menyemak `ldd`, `file`, dan ketiadaan `INTERP` program header, dan skip dalam fast CI build yang sengaja non-static
 - In-memory per-process security state untuk global/per-IP connection limit dan fixed-window rate limiting
 - Built-in ModSecurity-compatible WAF dengan subset OWASP CRS-inspired rules untuk scanner user-agent, request splitting/CRLF, path traversal, XSS, SQLi, RCE, PHP wrapper injection, dan Java/JNDI exploit patterns
 - SQLite `virtual_host_waf_overrides` untuk per-host WAF enable/disable, CRS/blocking override, anomaly threshold override, dan numeric rule exceptions
@@ -72,7 +73,6 @@ Planned:
 - HTTP/3 live UDP/QUIC serving, TLS 1.3 QUIC handshake, QPACK, and stream/session lifecycle. Candidate: `ngtcp2` + `nghttp3` atau `quiche`. Needs verification.
 - ALPN `h3` selepas HTTP/3 live serving siap dan diuji. Needs verification.
 - Bundled PHP, Python, Perl, atau runtime server-side lain. Needs verification.
-- First GitHub Actions CI run for `.github/workflows/ci.yml`. Needs verification.
 - Benchmark dan kemungkinan upgrade kepada `io_uring` atau event abstraction sendiri. Needs verification.
 
 Not present:
@@ -121,6 +121,7 @@ Not present:
 |       |-- 019-http2-tls-alpn-h2.md
 |       |-- 020-modsecurity-owasp-crs-built-in-waf.md
 |       |-- 021-ordered-update-checklist.md
+|       |-- 022-production-certificate-management.md
 |       `-- README.md
 |-- include/
 |   `-- rimau/
@@ -146,6 +147,7 @@ Not present:
     |-- test_http1_session.cpp
     |-- test_http_parser.cpp
     |-- test_http1_network.py
+    |-- test_static_elf.py
     |-- test_tls_alpn_h2_curl.py
     |-- test_tls_sni_cert_selection.py
     |-- test_http2_wire.cpp
@@ -201,6 +203,7 @@ Run tests:
 
 ```bash
 ctest --test-dir build --output-on-failure
+ctest --test-dir build --output-on-failure -R rimau_static_elf_checks
 ctest --test-dir build --output-on-failure -R rimau_tls_alpn_h2_curl
 ctest --test-dir build --output-on-failure -R rimau_tls_sni_cert_selection
 ```
@@ -254,6 +257,7 @@ Check bundled OpenSSL:
 
 ```bash
 build/_deps/openssl/install/bin/openssl version
+ctest --test-dir build --output-on-failure -R rimau_static_elf_checks
 ldd build/rimau-server || true
 file build/rimau-server
 readelf -l build/rimau-server | rg 'INTERP|Requesting program interpreter' || true
@@ -334,7 +338,7 @@ License file exists as GPL-3.0 from the target GitHub repository. Needs verifica
 
 GitHub remote: `https://github.com/asklinux/riwau-webserver`. Current source was pushed to remote `main` on 2026-07-20. The local working directory `/home/data/tunnelbiz/rimauwebserver` is now initialized as a Git repository on branch `main` with `origin` pointing to the GitHub remote.
 
-Production deployment, service manager, packaging, container, TLS certificate handling, log rotation, dan privilege dropping: Needs verification.
+Production TLS certificate path, permission, reload, rotation, and rollback guidance exists in `docs/plans/022-production-certificate-management.md`. Production deployment, service manager, packaging, container, final install layout, log rotation, dan privilege dropping: Needs verification.
 
 ## Existing Features
 
@@ -395,6 +399,8 @@ Production deployment, service manager, packaging, container, TLS certificate ha
 - HTTP/1.1 network integration test juga meliputi `virtual_host_waf_overrides` untuk default WAF block dan per-host allow path melalui `enabled:false`, `rule_exceptions`, dan threshold lebih tinggi.
 - TLS ALPN `h2` real-client integration test melalui CTest target `rimau_tls_alpn_h2_curl`; test ini guna `curl --http2`/nghttp2 apabila tersedia dan mengesahkan server memilih ALPN `h2`.
 - TLS SNI multi-certificate selection test melalui CTest target `rimau_tls_sni_cert_selection`; test ini guna bundled OpenSSL untuk menjana sijil dan membandingkan fingerprint cert default, exact host, dan wildcard host yang dipilih server.
+- Static deployment ELF check melalui CTest target `rimau_static_elf_checks`; default fully static build disahkan dengan `ldd`, `file`, dan `readelf -l` tanpa dynamic interpreter, manakala fast CI non-static build skip secara eksplisit.
+- Production certificate management guide di `docs/plans/022-production-certificate-management.md` untuk path, permission, reload, rotation, dan rollback.
 - WAF false-positive regression corpus melalui CTest untuk trafik normal curl, browser navigation/static asset, JSON API, form submission, dan WebSocket upgrade.
 - SQLite config database test asas melalui CTest.
 - CLI integration test melalui CTest untuk `--database`, `--set`, `--check-config`, dan `--protocols`.
@@ -412,7 +418,7 @@ Production deployment, service manager, packaging, container, TLS certificate ha
 - HTTP/1.1: Partial; body besar boleh discroll ke fail sementara dan dibaca handler melalui pull reader, basic chunked response API, multipart range/`If-Range`, configurable directory index, dan custom error page sudah ada. Live in-flight request streaming sebelum handler dispatch, reverse proxy body streaming, dan producer-side async response backpressure belum lengkap.
 - HTTP/2: Partial h2c dan TLS ALPN `h2` request serving; frame codec, SETTINGS/PING, HEADERS/DATA path, HPACK baseline, real-client TLS ALPN `h2` negotiation coverage, and shared handler pipeline dispatch exist. Continuation assembly, full HPACK dynamic/Huffman behavior, real-client request success, and flow control masih Planned.
 - HTTP/3: Partial wire codec primitives; UDP/QUIC/QPACK/live request serving masih Planned.
-- TLS: Partial for HTTP/1.1 HTTPS and HTTP/2 ALPN `h2` basics with TLS 1.2/1.3, SNI validation, automated multi-certificate SNI selection coverage, ALPN `http/1.1`/`h2`, safe cipher config, and new-connection certificate reload.
+- TLS: Partial for HTTP/1.1 HTTPS and HTTP/2 ALPN `h2` basics with TLS 1.2/1.3, SNI validation, automated multi-certificate SNI selection coverage, ALPN `http/1.1`/`h2`, safe cipher config, new-connection certificate reload, and production certificate management guidance. OCSP stapling is explicitly not supported by ADR-0039.
 - Event loop performance architecture: Partial with Linux `epoll` backend.
 - Virtual hosts: Partial; exact host, simple wildcard, static document root, proxy route, and script declaration are implemented.
 - Reverse proxy: Partial; HTTP/HTTPS upstream, buffered response untuk HTTP biasa, WebSocket tunnel untuk proxy vhost, round-robin asas, retry/failover asas, dan passive circuit breaker are implemented.
@@ -435,7 +441,7 @@ Production deployment, service manager, packaging, container, TLS certificate ha
 - PUT/PATCH/DELETE tidak memutasi fail; scaffold semasa pulang JSON metadata/body untuk method tersebut.
 - Request pipelining asas sudah ada, tetapi belum ada stress/integration test luas untuk ordering/backpressure.
 - Compression hanya gzip melalui bundled static zlib; Brotli ditangguh dalam P1 kerana tiada bundled dependency yang diterima.
-- `rimau-server` semasa validated sebagai static ELF: `ldd build/rimau-server` melaporkan `not a dynamic executable`, dan `readelf` tidak menunjukkan dynamic interpreter. Caveat: static glibc DNS/NSS untuk `getaddrinfo`/`gethostbyname` masih memberi linker warning dan perlu ujian production tambahan, terutama reverse proxy upstream hostname. Needs verification.
+- `rimau-server` semasa validated sebagai static ELF dan ada automated `rimau_static_elf_checks` untuk default static build. Caveat: static glibc DNS/NSS untuk `getaddrinfo`/`gethostbyname` masih memberi linker warning dan perlu ujian production tambahan, terutama reverse proxy upstream hostname. Needs verification.
 - HTTP/2 support baru melayan request asas melalui cleartext h2c prior knowledge dan TLS ALPN `h2`; full multiplexing semantics, continuation assembly, HPACK Huffman, HPACK dynamic table persistence, dan flow control penuh belum implemented.
 - Automated `curl --http2` TLS ALPN test verifies that a real HTTP/2 client negotiates `h2`, but curl/nghttp2 request completion can still fail with `COMPRESSION_ERROR` because HPACK Huffman decode is not implemented yet.
 - HTTP/3 support belum live di network; codec semasa hanya QUIC varint/frame/SETTINGS primitives tanpa QUIC transport atau QPACK.
@@ -445,6 +451,7 @@ Production deployment, service manager, packaging, container, TLS certificate ha
 - Script virtual host untuk PHP/Python/Perl belum menjalankan interpreter atau VM. Memanggil interpreter sistem akan melanggar syarat no external runtime dependency; runtime bundled perlu keputusan dan integrasi berasingan. Needs verification.
 - TLS request serving implemented untuk HTTP/1.1 dan partial HTTP/2 ALPN `h2`; ALPN `h3` belum diiklankan kerana HTTP/3 live request serving belum implemented.
 - TLS certificate/key reload hanya untuk sambungan baharu; sambungan TLS sedia ada terus menggunakan context lama.
+- OCSP stapling tidak disokong; ADR-0039 sengaja menangguhkan implementasi dan tidak menambah config placeholder.
 - Rate limiting dan connection counters adalah in-memory per process, bukan distributed.
 - WAF semasa ialah signature/anomaly engine ringkas terbina dalam. Ia bukan full ModSecurity transaction engine, tidak membaca syntax rule ModSecurity sebenar, tidak bundle full OWASP Core Rule Set, dan tiada phase engine lengkap. Per-host override asas sudah ada melalui `virtual_host_waf_overrides`, dan structured audit event sudah ada melalui logger, tetapi tiada dedicated persistent audit sink atau per-path/per-parameter/tag-based rule exclusion language. ADR-0034 defers full ModSecurity/libmodsecurity + OWASP CRS integration beyond P1. Needs verification.
 - Security header names masih fixed set; nilainya boleh dikonfigurasi atau dikosongkan melalui SQLite.
@@ -466,6 +473,7 @@ Primary:
 cmake -S . -B build
 cmake --build build
 ctest --test-dir build --output-on-failure
+ctest --test-dir build --output-on-failure -R rimau_static_elf_checks
 ./build/rimau-http2-wire-tests
 ./build/rimau-http3-wire-tests
 ./build/rimau-waf-tests
@@ -500,6 +508,14 @@ ctest --test-dir build --output-on-failure -R rimau_tls_sni_cert_selection
 ```
 
 This test proves default fallback, exact host, and simple wildcard SNI certificate selection using bundled OpenSSL fingerprints.
+
+Automated static ELF deployment check:
+
+```bash
+ctest --test-dir build --output-on-failure -R rimau_static_elf_checks
+```
+
+This test checks `ldd`, `file`, and `readelf -l` for default fully static Linux builds. It reports a CTest skip when CMake is configured with `RIMAU_FULLY_STATIC_SERVER=OFF` or `RIMAU_USE_BUNDLED_GLIBC=OFF`, such as the GitHub Actions fast path.
 
 Documentation check:
 

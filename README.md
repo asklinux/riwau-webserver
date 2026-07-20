@@ -2,7 +2,7 @@
 
 Rimau Web Server ialah projek C++ untuk membina web server berprestasi tinggi dengan sasaran jangka panjang setanding kelas OpenLiteSpeed dan nginx.
 
-Status semasa: scaffold awal yang sudah mempunyai HTTP/1.1 praktikal. HTTP/1.1 menyokong GET/HEAD static serving, OPTIONS, POST/PUT/PATCH/DELETE JSON scaffold, Content-Length, chunked request decoding, keep-alive, basic pipelining, single-range responses, gzip static compression, basic WebSocket echo, WebSocket reverse proxy tunneling untuk proxy vhost, TLS hardening asas, timeout, rate limit, kawalan connection/IP, built-in ModSecurity-compatible WAF subset dengan per-host overrides, virtual host static, dan reverse proxy baseline dengan HTTP/HTTPS upstream, multi-upstream round-robin asas, retry/failover asas, dan passive circuit breaker. HTTP/2 kini partial: frame codec, SETTINGS/PING, HPACK asas tanpa Huffman, decode literal incremental indexing tanpa dynamic-table persistence, cleartext h2c prior-knowledge request serving, dan TLS ALPN `h2` request serving asas melalui shared handler pipeline sudah ada. Flow control penuh, continuation assembly, dan production-grade stream/session behavior belum siap. HTTP/3 kini partial pada codec primitive: QUIC varint, frame, dan SETTINGS payload parser/serializer sudah ada, tetapi UDP/QUIC/QPACK/live request serving belum siap.
+Status semasa: scaffold awal yang sudah mempunyai HTTP/1.1 praktikal. HTTP/1.1 menyokong GET/HEAD static serving, OPTIONS, POST/PUT/PATCH/DELETE JSON scaffold, Content-Length, chunked request decoding, keep-alive, basic pipelining, single/multipart range responses, gzip static compression, basic WebSocket echo, WebSocket reverse proxy tunneling untuk proxy vhost, TLS hardening asas, timeout, rate limit, kawalan connection/IP, built-in ModSecurity-compatible WAF subset dengan per-host overrides, virtual host static, dan reverse proxy baseline dengan HTTP/HTTPS upstream, multi-upstream round-robin asas, retry/failover asas, dan passive circuit breaker. HTTP/2 kini partial: frame codec, SETTINGS/PING, HPACK asas tanpa Huffman, decode literal incremental indexing tanpa dynamic-table persistence, cleartext h2c prior-knowledge request serving, dan TLS ALPN `h2` request serving asas melalui shared handler pipeline sudah ada. Flow control penuh, continuation assembly, dan production-grade stream/session behavior belum siap. HTTP/3 kini partial pada codec primitive: QUIC varint, frame, dan SETTINGS payload parser/serializer sudah ada, tetapi UDP/QUIC/QPACK/live request serving belum siap.
 
 Seni bina request pipeline mengambil inspirasi konsep daripada Proxygen, tetapi kod Proxygen tidak disalin ke projek ini.
 
@@ -13,11 +13,11 @@ Runtime server menggunakan Linux `epoll` reactor dengan worker thread berdasarka
 
 HTTP/1.1 keep-alive disokong untuk request dengan framing header-only, `Content-Length`, atau `Transfer-Encoding: chunked`. SIGHUP boleh reload nilai SQLite tertentu seperti `document_root`, request size limit, keep-alive settings, timeout, rate limit, IP list, virtual host/proxy settings, TCP keepalive settings untuk connection baru, protocol status flags, TLS certificate/key/settings untuk connection baru, dan graceful shutdown timeout tanpa restart proses.
 
-TLS/SSL dibina terus ke Rimau melalui bundled static OpenSSL. CMake memuat turun dan membina OpenSSL khusus untuk Rimau; runtime tidak link kepada `libssl` atau `libcrypto` sistem. TLS semasa menyokong TLS 1.2/1.3, SNI validation, multi-certificate SNI selection, ALPN `http/1.1` dan partial `h2`, configurable cipher list/ciphersuites, dan reload certificate/key untuk sambungan baharu.
+TLS/SSL dibina terus ke Rimau melalui bundled static OpenSSL. CMake memuat turun dan membina OpenSSL khusus untuk Rimau; runtime tidak link kepada `libssl` atau `libcrypto` sistem. TLS semasa menyokong TLS 1.2/1.3, SNI validation, multi-certificate SNI selection, ALPN `http/1.1` dan partial `h2`, configurable cipher list/ciphersuites, reload certificate/key untuk sambungan baharu, dan production certificate management guide. OCSP stapling tidak disokong setakat ini.
 
 Gzip response compression menggunakan bundled static zlib 1.3.2; runtime tidak link kepada `libz` sistem.
 
-Pada Linux x86_64 dengan GNU/Clang, CMake membina GNU glibc 2.43 daripada source asal, membina Linux UAPI headers 6.18.7 daripada source kernel.org, membina GNU Bison 3.8.2 sebagai build tool glibc, dan link `rimau-server` sebagai static ELF melalui sysroot bundled tersebut. Validasi semasa: `ldd build/rimau-server` melaporkan `not a dynamic executable`.
+Pada Linux x86_64 dengan GNU/Clang, CMake membina GNU glibc 2.43 daripada source asal, membina Linux UAPI headers 6.18.7 daripada source kernel.org, membina GNU Bison 3.8.2 sebagai build tool glibc, dan link `rimau-server` sebagai static ELF melalui sysroot bundled tersebut. CTest `rimau_static_elf_checks` mengesahkan `ldd`, `file`, dan tiada `INTERP` untuk build static penuh.
 
 ## HTTP/1.1 Notes
 
@@ -50,6 +50,7 @@ cmake -S . -B build
 cmake --build build
 ctest --test-dir build --output-on-failure
 ctest --test-dir build --output-on-failure -R rimau_http_fuzz
+ctest --test-dir build --output-on-failure -R rimau_static_elf_checks
 ctest --test-dir build --output-on-failure -R rimau_tls_alpn_h2_curl
 ctest --test-dir build --output-on-failure -R rimau_tls_sni_cert_selection
 ```
@@ -99,6 +100,8 @@ make start-https
 curl -k -I https://127.0.0.1:18443/
 make stop-https
 ```
+
+Production certificate path, permission, reload, rotation, dan rollback guidance ada di `docs/plans/022-production-certificate-management.md`. OCSP stapling tidak disokong; ADR-0039 menangguhkan fungsi itu sehingga ada design penuh.
 
 OpenSSL bundled dipin kepada `openssl-4.0.1`, zlib kepada `1.3.2`, SQLite kepada `3.53.3`, glibc kepada `2.43`, GNU Bison kepada `3.8.2`, dan Linux UAPI headers kepada source kernel `6.18.7` dalam `CMakeLists.txt`. Untuk update dependency khusus Rimau, ubah versi/URL/SHA256 di CMake, kemudian rebuild.
 

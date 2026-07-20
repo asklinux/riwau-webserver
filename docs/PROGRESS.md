@@ -24,11 +24,14 @@ Implemented:
 - Bundled Linux UAPI headers from Linux kernel source 6.18.7 through CMake.
 - Bundled GNU glibc 2.43 source build through CMake for Linux x86_64.
 - Fully static `rimau-server` linking through bundled glibc sysroot on current Linux x86_64 GNU/Clang validation.
+- Automated fully static ELF validation through CTest target `rimau_static_elf_checks`.
 - HTTP/1.1 HTTPS/TLS support through bundled OpenSSL.
 - TLS 1.2/TLS 1.3 range configuration through SQLite.
 - TLS cipher list and TLS 1.3 ciphersuites configuration through SQLite.
 - SNI hostname validation and multi-certificate SNI selection.
 - Automated TLS SNI multi-certificate selection smoke through CTest target `rimau_tls_sni_cert_selection` using bundled OpenSSL fingerprints for default fallback, exact host, and simple wildcard host patterns.
+- Production certificate management guide covering recommended paths, permissions, SQLite TLS/SNI config, SIGHUP reload, rotation, and rollback.
+- ADR-0039 explicitly defers OCSP stapling; Rimau does not support OCSP stapling yet.
 - ALPN callback for `http/1.1` and partial `h2` when HTTP/2 is enabled.
 - SIGHUP TLS certificate/key/settings reload for new connections.
 - Dev certificate generation with bundled OpenSSL binary.
@@ -115,7 +118,7 @@ Partial:
 - HTTP/1.1 support is partial; file-backed large-body spooling, handler pull body reader, basic chunked response API, multipart range/`If-Range`, directory index config, and custom error page exist, but live in-flight request body dispatch, reverse proxy request/response streaming, producer-side async response backpressure, Brotli, full WebSocket application routing, and broad stress validation are not implemented.
 - Proxygen-inspired pipeline is partial; filter chain, async handler body streaming, and full protocol session adapters are not implemented.
 - SQLite config is partial; schema version table exists, but multi-step migration framework, admin UI, and config backup policy are not implemented. SIGHUP live reload is implemented only for restart-free dynamic values.
-- TLS is partial; production certificate lifecycle and OCSP are not implemented. HTTP/2 ALPN `h2` request serving exists only as a partial basic path, not production-complete HTTP/2.
+- TLS is partial; production certificate lifecycle guidance exists, but issuance/renewal automation and OCSP stapling are not implemented. HTTP/2 ALPN `h2` request serving exists only as a partial basic path, not production-complete HTTP/2.
 - Virtual hosts are partial; exact host, simple wildcard, static roots, proxy rules, and script declarations exist, but rewrite rules and richer routing are not implemented.
 - Reverse proxy is partial; HTTP/HTTPS upstream, optional default-trust-path certificate verification, buffered normal HTTP response, WebSocket tunnel data path through worker `epoll`, basic hop-by-hop header stripping, basic round-robin, retry/failover, and passive circuit breaker exist. Per-upstream HTTPS verification policy, normal HTTP proxy streaming, advanced load balancing, active health checks, and upstream connection pooling are not implemented.
 - ModSecurity/WAF is partial; a built-in ModSecurity-compatible anomaly-scoring WAF with OWASP CRS-inspired subset rules, basic per-host overrides, and structured redacted audit events exists, but full `libmodsecurity` and full OWASP Core Rule Set are not bundled or implemented. ADR-0034 defers full bundling beyond P1. Needs verification.
@@ -145,12 +148,12 @@ Semasa pemeriksaan awal pada 2026-07-18:
 
 | Area | Status | Notes |
 | --- | --- | --- |
-| Build system | Implemented | CMake with bundled static OpenSSL, SQLite, zlib, Bison, Linux UAPI headers, and glibc targets; `rimau-server` is fully static in current Linux x86_64 validation. |
+| Build system | Implemented | CMake with bundled static OpenSSL, SQLite, zlib, Bison, Linux UAPI headers, and glibc targets; `rimau-server` is fully static in current Linux x86_64 validation and covered by `rimau_static_elf_checks`. |
 | CLI | Partial | `--database`, `--set`, `--check-config`, `--protocols`, `--version`, `--help`. |
 | HTTP/1.1 | Partial | GET/HEAD static, POST/PUT/PATCH/DELETE JSON scaffold, OPTIONS, Content-Length, chunked decode, file-backed large-body spooling, pull request-body reader, basic chunked response API, keep-alive, basic pipelining, single/multipart range with `If-Range`, gzip, configurable directory index/custom error page, WebSocket echo, WebSocket reverse proxy tunnel, and extracted testable request framing. |
 | HTTP/2 | Partial | Frame codec, SETTINGS/PING basics, HPACK baseline, cleartext h2c and TLS ALPN `h2` HEADERS/DATA request serving through the shared handler pipeline exist; real-client TLS ALPN `h2` negotiation is covered with curl/nghttp2, but no production flow control, CONTINUATION assembly, HPACK Huffman, dynamic-table persistence, or full real-client request success yet. |
 | HTTP/3 | Partial | QUIC varint, frame codec, and SETTINGS codec exist; no UDP/QUIC/QPACK/live serving yet. |
-| TLS | Partial | HTTP/1.1 HTTPS and partial HTTP/2 ALPN `h2` via bundled static OpenSSL 4.0.1 with TLS 1.2/1.3, SNI validation, automated multi-certificate SNI selection coverage, ALPN `http/1.1`/`h2`, safe cipher config, and SIGHUP context reload for new connections. |
+| TLS | Partial | HTTP/1.1 HTTPS and partial HTTP/2 ALPN `h2` via bundled static OpenSSL 4.0.1 with TLS 1.2/1.3, SNI validation, automated multi-certificate SNI selection coverage, ALPN `http/1.1`/`h2`, safe cipher config, SIGHUP context reload for new connections, and production certificate management guidance. OCSP stapling is not supported by ADR-0039. |
 | Static files | Partial | Serves from `document_root`, supports configurable directory index/custom error page, MIME detection, gzip, single/multipart range, and `If-Range`; no zero-copy path yet. |
 | Virtual hosts | Partial | Exact host and simple `*.domain` matching, static vhost, proxy vhost, and script declarations. |
 | Reverse proxy | Partial | HTTP/HTTPS upstream, optional default-trust-path certificate verification, buffered normal HTTP response, WebSocket tunnel data path in worker `epoll`, basic round-robin, retry/failover, and passive circuit breaker; no per-upstream CA/pinning policy, active health checks, normal HTTP proxy streaming, or upstream connection pooling yet. |
@@ -158,7 +161,7 @@ Semasa pemeriksaan awal pada 2026-07-18:
 | Request pipeline | Partial | Handler/factory/transaction/response sink implemented for static, vhost, reverse proxy, and script-placeholder HTTP/1.1. |
 | Config | Partial | SQLite table `rimau_config`, schema metadata table `rimau_schema_migrations`, protocol, TLS, keep-alive, static file, timeout, rate-limit, IP-list, security-header, virtual-host/proxy keys, and limited SIGHUP reload behavior. |
 | Security | Partial | Baseline HTTP framing hardening, timeout, rate limit, connection limit, built-in ModSecurity-compatible WAF subset with per-host overrides and structured redacted audit events, configurable security header values, IPv4/IPv6 IP allow/block list, and deterministic parser/framing fuzz smoke are implemented; broader fuzzing and production hardening remain pending, while full ModSecurity/CRS integration is deferred beyond P1 by ADR-0034. |
-| Tests | Partial | Parser, HTTP/1.1 session/framing, deterministic HTTP parser/framing fuzz smoke, TLS ALPN `h2` real-client curl smoke, TLS SNI multi-certificate selection smoke, HTTP/1.1 network integration including request-smuggling rejection, rate limiting, connection limits, request/header/body/idle timeout slow-client behavior, WAF block paths for HTTP/1.1/WebSocket/WebSocket proxy/partial HTTP/2, WAF virtual-host override and audit-log redaction behavior, WAF false-positive corpus, response serializer, handler pipeline, SQLite config, CLI config, protocol capability, HTTP/2 wire, HTTP/3 wire, virtual host, and WAF tests. |
+| Tests | Partial | Parser, HTTP/1.1 session/framing, deterministic HTTP parser/framing fuzz smoke, static ELF check, TLS ALPN `h2` real-client curl smoke, TLS SNI multi-certificate selection smoke, HTTP/1.1 network integration including request-smuggling rejection, rate limiting, connection limits, request/header/body/idle timeout slow-client behavior, WAF block paths for HTTP/1.1/WebSocket/WebSocket proxy/partial HTTP/2, WAF virtual-host override and audit-log redaction behavior, WAF false-positive corpus, response serializer, handler pipeline, SQLite config, CLI config, protocol capability, HTTP/2 wire, HTTP/3 wire, virtual host, and WAF tests. |
 | Deployment | Planned | No production deployment files. |
 | Database | Partial | SQLite is used for runtime configuration only; the SQLite engine is bundled static and config schema version `1` is recorded. |
 | I/O model | Partial | Linux `epoll` reactor with per-worker event loops and SO_REUSEPORT implemented; benchmarks still pending. |
@@ -169,21 +172,39 @@ Most recent completed on 2026-07-20:
 
 ```bash
 cmake -S . -B build
-python3 -m py_compile tests/test_tls_sni_cert_selection.py
-ctest --test-dir build --output-on-failure -R rimau_tls_sni_cert_selection
+python3 -m py_compile tests/test_static_elf.py
+ctest --test-dir build --output-on-failure -R rimau_static_elf_checks
 ctest --test-dir build --output-on-failure
 cmake --build build --target rimau-server
+cmake -S . -B build-ci -G Ninja -DRIMAU_ENABLE_TESTS=ON -DRIMAU_FULLY_STATIC_SERVER=OFF -DRIMAU_USE_BUNDLED_GLIBC=OFF
+ctest --test-dir build-ci --output-on-failure -R rimau_static_elf_checks
+./build/rimau-server --check-config
+./build/rimau-server --database data/rimau.sqlite3 --check-config
 git diff --check
 ```
 
 Result:
 
 - CMake configure passed.
-- Python syntax check for `tests/test_tls_sni_cert_selection.py` passed.
-- `rimau_tls_sni_cert_selection` passed, 1/1.
-- Full CTest passed, 15/15.
+- Python syntax check for `tests/test_static_elf.py` passed.
+- `rimau_static_elf_checks` passed, 1/1, for the default fully static build.
+- Full CTest passed, 16/16.
 - `rimau-server` target built.
+- Fast CI CMake configure with `RIMAU_FULLY_STATIC_SERVER=OFF` and `RIMAU_USE_BUNDLED_GLIBC=OFF` passed.
+- `rimau_static_elf_checks` in `build-ci` skipped as expected for the non-static fast-CI build.
+- Default config check passed.
+- `data/rimau.sqlite3` config check passed.
 - Diff whitespace check passed.
+
+Phase 3 certificate lifecycle and static deployment update:
+
+- Added `tests/test_static_elf.py`.
+- Added CTest target `rimau_static_elf_checks`.
+- Default fully static builds now validate `ldd`, `file`, and `readelf -l` with no dynamic interpreter.
+- Fast CI non-static builds report a CTest skip for `rimau_static_elf_checks` instead of a false failure.
+- Added `docs/plans/022-production-certificate-management.md` covering certificate paths, permissions, SQLite TLS/SNI config, SIGHUP reload, rotation, and rollback.
+- Added ADR-0039 to state that OCSP stapling is not supported in Phase 3.
+- Marked all Phase 3 ordered checklist items complete.
 
 Phase 3 SNI multi-certificate selection test update:
 

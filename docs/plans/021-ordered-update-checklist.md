@@ -89,12 +89,15 @@ Untuk setiap item:
 - [x] Tambah automated multi-certificate SNI selection test.
   - Done criteria: cert dipilih mengikut host exact/wildcard.
   - Status: Added CTest `rimau_tls_sni_cert_selection` via `tests/test_tls_sni_cert_selection.py`; it generates default, exact-host, and wildcard-host certificates with bundled OpenSSL, starts a temporary TLS Rimau server, then uses bundled `openssl s_client`/`x509` fingerprints to verify default fallback, exact `api.example.test`, and wildcard `app.tenant.test` certificate selection.
-- [ ] Tambah OCSP stapling decision/implementation.
+- [x] Tambah OCSP stapling decision/implementation.
   - Done criteria: ADR diterima dan test/config wujud, atau dinyatakan tidak disokong.
-- [ ] Tambah production certificate management guide.
+  - Status: ADR-0039 accepted deferring OCSP stapling in Phase 3 and explicitly states Rimau does not support OCSP stapling yet; no misleading `tls_ocsp_*` config keys were added.
+- [x] Tambah production certificate management guide.
   - Done criteria: docs jelaskan path, permission, reload, rotation, dan rollback.
-- [ ] Tambah automated fully-static ELF checks.
+  - Status: Added `docs/plans/022-production-certificate-management.md` with recommended certificate paths, ownership/permissions, SQLite TLS/SNI config, SIGHUP reload, rotation, rollback, and OCSP unsupported note.
+- [x] Tambah automated fully-static ELF checks.
   - Done criteria: CI/local script semak `ldd`, `file`, dan tiada `INTERP`.
+  - Status: Added CTest `rimau_static_elf_checks` via `tests/test_static_elf.py`; default fully static builds verify `ldd`, `file`, and `readelf -l`, while non-static CI fast builds report CTest skip instead of false failure.
 
 ## Phase 4: HTTP/2 Production Path
 

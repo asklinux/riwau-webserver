@@ -44,11 +44,8 @@
 
 ## P1 - TLS And Protocol Negotiation
 
-- Add production certificate management guidance.
-- Add OCSP stapling. Needs verification.
 - Add automated test that ALPN advertises only implemented or explicitly partial-tested protocols and still rejects `h3`.
 - Add tests for TLS config failure modes.
-- Add automated check that `rimau-server` is a fully static ELF and has no dynamic interpreter.
 - Add automated check that the link command uses the bundled glibc sysroot when `RIMAU_USE_BUNDLED_GLIBC=ON`.
 - Add documented bundled dependency update script to refresh OpenSSL, SQLite, zlib, Bison, Linux headers, and glibc versions and SHA256 pins.
 - Add integration tests for reverse proxy hostname resolution with static glibc DNS/NSS behavior. Needs verification.
@@ -121,6 +118,7 @@
 - Add package build.
 - Add log rotation config.
 - Add production hardening guide.
+- Revisit OCSP stapling only with an accepted design for issuer chain handling, responder fetch/cache/refresh, failure policy, SIGHUP behavior, outbound network policy, and real-client tests. Needs verification.
 
 ## Documentation Maintenance
 

@@ -60,6 +60,7 @@ Responsibility:
 - TLS context setup through bundled OpenSSL, including SNI certificate contexts
 - TLS context live swap for new connections on accepted SIGHUP reloads
 - Source-built dependency sysroot setup for fully static Linux x86_64 server builds
+- Static deployment ELF validation through CTest `rimau_static_elf_checks`
 - Runtime server setup
 - TCP listener lifecycle through per-worker non-blocking Linux `epoll` reactor
 - Runtime security counters for global/per-IP connections and per-IP rate limits
@@ -170,6 +171,8 @@ Version `1` is `initial rimau_config schema`. Existing SQLite databases that alr
 
 TLS-related config values store file paths only. Certificate and private key files themselves are not stored inside SQLite.
 
+Production certificate path, permission, reload, rotation, and rollback guidance is documented in `docs/plans/022-production-certificate-management.md`. OCSP stapling is not supported; ADR-0039 records the decision to defer it instead of adding placeholder config keys.
+
 Supported keys:
 
 - `host`
@@ -269,6 +272,14 @@ For Linux x86_64 GNU/Clang builds, `rimau-server` links with:
 ```
 
 Current validation shows `ldd build/rimau-server` reports `not a dynamic executable` and `readelf -l build/rimau-server` has no `INTERP` program header. The test binaries are build artifacts for validation and are not the deployment target.
+
+CTest target `rimau_static_elf_checks` automates the deployable binary checks:
+
+```bash
+ctest --test-dir build --output-on-failure -R rimau_static_elf_checks
+```
+
+For default fully static builds it runs `ldd`, `file`, and `readelf -l` against `rimau-server`. For fast CI builds configured with `RIMAU_FULLY_STATIC_SERVER=OFF` or `RIMAU_USE_BUNDLED_GLIBC=OFF`, the test reports a CTest skip rather than failing a deliberately non-static binary.
 
 Build-time still requires host compiler/tooling such as `gcc`/`g++`, `make`, `perl`, `gawk`, `msgfmt`, `python3`, and `m4`. These are build requirements, not runtime shared-library dependencies for the deployable `rimau-server`.
 
@@ -509,6 +520,8 @@ When `modsecurity_audit_log_enabled=true`, WAF matches emit a structured `rimau_
 Rimau does not yet own a dedicated audit file, retention engine, or rotation engine. Production deployments should route stderr through systemd-journald, a container log driver, or supervisor-managed files with logrotate. Audit logs should be readable only by the service owner/security operators. A 7-30 day retention window is a reasonable starting policy until the operator defines a site-specific retention requirement. Needs verification.
 
 SIGHUP reloads SQLite config values that can safely change without recreating listener sockets or worker threads. Dynamic values include `document_root`, `directory_index`, `error_page`, `max_request_bytes`, HTTP keep-alive settings, TCP keepalive settings for newly accepted sockets, protocol status flags, graceful shutdown timeout, request/header/body/idle timeout, rate-limit settings, IPv4/IPv6 IP allow/block lists, security header behavior/values, virtual host and reverse proxy settings, WAF settings, and TLS certificate/key/SNI/TLS settings for new TLS connections. Changes to bind address, port, listener backlog, worker count, epoll batch size, `SO_REUSEPORT`, connection pool sizing, HTTP/1 enablement, or `tls_enabled` require restart.
+
+For TLS certificate operations, use `--check-config` before SIGHUP and follow `docs/plans/022-production-certificate-management.md` for rotation and rollback. Existing TLS connections keep their negotiated context after reload; new TLS connections use the reloaded context.
 
 Production config ownership, backup, and migration behavior are not final. Needs verification.
 

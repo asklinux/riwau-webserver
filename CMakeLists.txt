@@ -338,6 +338,11 @@ endif()
 if(RIMAU_ENABLE_TESTS)
     enable_testing()
 
+    set(RIMAU_EXPECT_FULLY_STATIC_TEST false)
+    if(RIMAU_FULLY_STATIC_SERVER AND RIMAU_USE_BUNDLED_GLIBC)
+        set(RIMAU_EXPECT_FULLY_STATIC_TEST true)
+    endif()
+
     add_executable(rimau-http-parser-tests
         tests/test_http_parser.cpp)
     target_link_libraries(rimau-http-parser-tests PRIVATE rimau_core)
@@ -425,6 +430,15 @@ if(RIMAU_ENABLE_TESTS)
             "$<TARGET_FILE:rimau-server>"
             "${CMAKE_BINARY_DIR}/test-runtime"
             "${RIMAU_OPENSSL_INSTALL_DIR}/bin/openssl")
+    add_test(
+        NAME rimau_static_elf_checks
+        COMMAND
+            "${RIMAU_PYTHON3_EXECUTABLE}"
+            "${CMAKE_SOURCE_DIR}/tests/test_static_elf.py"
+            "$<TARGET_FILE:rimau-server>"
+            "${RIMAU_EXPECT_FULLY_STATIC_TEST}")
+    set_tests_properties(rimau_static_elf_checks PROPERTIES
+        SKIP_REGULAR_EXPRESSION "SKIP:")
 endif()
 
 install(TARGETS rimau-server RUNTIME DESTINATION bin)

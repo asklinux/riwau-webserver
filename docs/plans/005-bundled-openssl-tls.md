@@ -15,6 +15,8 @@ Add SSL/TLS support to Rimau Web Server without requiring a system OpenSSL runti
 - Rimau links to bundled `libssl.a` and `libcrypto.a`.
 - `rimau-server` does not dynamically link to `libssl` or `libcrypto`.
 - HTTP/1.1 connections can use TLS when SQLite config `tls_enabled=true`.
+- TLS 1.2/1.3 version range, cipher list, ciphersuites, ALPN, SNI selection, and SIGHUP TLS context reload for new connections are configured through SQLite.
+- Production certificate management guidance exists in `docs/plans/022-production-certificate-management.md`.
 - Dev certificate generation uses the bundled `openssl` binary.
 - Added `make start-https`, `make stop-https`, `make status-https`, and `make serve-https`.
 
@@ -23,6 +25,14 @@ Add SSL/TLS support to Rimau Web Server without requiring a system OpenSSL runti
 - `tls_enabled`
 - `tls_certificate_file`
 - `tls_private_key_file`
+- `tls_min_version`
+- `tls_max_version`
+- `tls_cipher_list`
+- `tls_ciphersuites`
+- `tls_alpn_protocols`
+- `tls_sni_hosts`
+- `tls_sni_certificates`
+- `tls_sni_required`
 
 ## Validation
 
@@ -42,11 +52,8 @@ Expected:
 
 ## Not Implemented Yet
 
-- Production certificate lifecycle.
-- Certificate reload.
-- ALPN.
-- HTTP/2 negotiation over TLS.
-- OCSP stapling.
+- ACME issuance/renewal automation.
+- OCSP stapling; ADR-0039 explicitly defers it instead of adding placeholder config keys.
 - Session tickets/resumption policy.
 
 ## Update Process

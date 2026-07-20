@@ -90,6 +90,7 @@ Jalankan command ini selepas perubahan C++ apabila boleh:
 cmake -S . -B build
 cmake --build build
 ctest --test-dir build --output-on-failure
+ctest --test-dir build --output-on-failure -R rimau_static_elf_checks
 ./build/rimau-waf-tests
 ./build/rimau-server --check-config
 ./build/rimau-server --database data/rimau.sqlite3 --check-config

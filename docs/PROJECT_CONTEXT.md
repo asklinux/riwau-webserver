@@ -401,7 +401,7 @@ Production deployment, service manager, packaging, container, TLS certificate ha
 - Event loop performance architecture: Partial with Linux `epoll` backend.
 - Virtual hosts: Partial; exact host, simple wildcard, static document root, proxy route, and script declaration are implemented.
 - Reverse proxy: Partial; HTTP/HTTPS upstream, buffered response untuk HTTP biasa, WebSocket tunnel untuk proxy vhost, round-robin asas, retry/failover asas, dan passive circuit breaker are implemented.
-- WAF/ModSecurity: Partial; SQLite-configurable built-in ModSecurity-compatible WAF with OWASP CRS-inspired subset rules is implemented. Full `libmodsecurity` integration and full OWASP Core Rule Set bundle remain planned. Needs verification.
+- WAF/ModSecurity: Partial; SQLite-configurable built-in ModSecurity-compatible WAF with OWASP CRS-inspired subset rules is implemented. ADR-0034 keeps this Rimau-native WAF for P1. Full `libmodsecurity` integration and full OWASP Core Rule Set bundle are deferred beyond P1 and need pinned source/version/license/build/update/test planning before implementation. Needs verification.
 - Server-side language runtimes: Planned; declarations exist but PHP/Python/Perl execution is not implemented.
 - Access log format: Partial through stderr logger only.
 - Config reload: Partial for restart-free dynamic SQLite values.
@@ -430,7 +430,7 @@ Production deployment, service manager, packaging, container, TLS certificate ha
 - TLS request serving implemented untuk HTTP/1.1 dan partial HTTP/2 ALPN `h2`; ALPN `h3` belum diiklankan kerana HTTP/3 live request serving belum implemented.
 - TLS certificate/key reload hanya untuk sambungan baharu; sambungan TLS sedia ada terus menggunakan context lama.
 - Rate limiting dan connection counters adalah in-memory per process, bukan distributed.
-- WAF semasa ialah signature/anomaly engine ringkas terbina dalam. Ia bukan full ModSecurity transaction engine, tidak membaca syntax rule ModSecurity sebenar, tidak bundle full OWASP Core Rule Set, tiada phase engine lengkap, tiada persistent audit log berstruktur, dan rule tuning/exception per virtual host belum implemented. Full ModSecurity/libmodsecurity + OWASP CRS integration remains Needs verification.
+- WAF semasa ialah signature/anomaly engine ringkas terbina dalam. Ia bukan full ModSecurity transaction engine, tidak membaca syntax rule ModSecurity sebenar, tidak bundle full OWASP Core Rule Set, tiada phase engine lengkap, tiada persistent audit log berstruktur, dan rule tuning/exception per virtual host belum implemented. ADR-0034 defers full ModSecurity/libmodsecurity + OWASP CRS integration beyond P1. Needs verification.
 - Security header names masih fixed set; nilainya boleh dikonfigurasi atau dikosongkan melalui SQLite.
 - SIGHUP reload tidak menukar listener bind, worker count, HTTP/1 enablement, TLS enabled mode, atau connection pool sizing; ubah nilai tersebut memerlukan restart.
 - Dev certificate self-signed tidak sesuai untuk production.

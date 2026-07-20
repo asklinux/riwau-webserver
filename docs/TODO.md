@@ -57,11 +57,10 @@
 
 ## P1 - Security Hardening
 
-- Decide whether to integrate full `libmodsecurity` as a bundled source dependency or keep Rimau-native WAF rules only. Needs verification.
-- If full OWASP Core Rule Set is bundled, pin the upstream source/version, license notes, update process, test corpus, and rule exclusion policy. Needs verification.
+- Revisit full `libmodsecurity` plus full OWASP Core Rule Set after P1 only with pinned source/version, license notes, build plan, update process, test corpus, and rule exclusion policy. Needs verification.
 - Add per-virtual-host WAF enable/disable, anomaly threshold, and rule exception controls if required. Needs verification.
 - Add structured WAF audit log format and persistence policy. Needs verification.
-- Add ModSecurity rule syntax/parser support only if full compatibility is accepted. Needs verification.
+- Add ModSecurity rule syntax/parser support only if future full compatibility is accepted. Needs verification.
 - Add CTest or integration harness for IPv6 listener and IPv6 allowlist/blocklist behavior.
 - Add support for arbitrary custom security header names if the fixed built-in set is not enough. Needs verification.
 - Add token-bucket or leaky-bucket rate limiting if fixed-window behavior is too bursty. Needs verification.

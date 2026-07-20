@@ -756,7 +756,7 @@ Missing:
 - Privilege dropping.
 - Full parser hardening and fuzzing.
 - Fuzz testing.
-- Full `libmodsecurity` transaction engine integration and full OWASP Core Rule Set bundle. Needs verification.
+- Full `libmodsecurity` transaction engine integration and full OWASP Core Rule Set bundle are deferred beyond P1 by ADR-0034. Needs verification.
 - WAF rule tuning, per-virtual-host WAF overrides, structured audit log persistence, and ModSecurity rule syntax parsing.
 - Advanced slow-client scoring.
 - Safe default production file permissions.

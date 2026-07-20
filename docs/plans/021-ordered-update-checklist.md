@@ -68,8 +68,9 @@ Untuk setiap item:
 - [x] Bina WAF false-positive regression corpus.
   - Done criteria: traffic normal browser/curl tidak diblock oleh rule default.
   - Status: `rimau_waf` now includes a structured false-positive corpus for normal curl, browser navigation/static asset, search, JSON API, form, and WebSocket upgrade traffic; each case must stay allowed with no WAF matches under default blocking WAF settings.
-- [ ] Decide full `libmodsecurity` + full OWASP CRS atau kekal Rimau-native WAF.
+- [x] Decide full `libmodsecurity` + full OWASP CRS atau kekal Rimau-native WAF.
   - Done criteria: ADR accepted dengan source/version/license/build plan atau keputusan untuk tidak bundle.
+  - Status: ADR-0034 accepted keeping the Rimau-native ModSecurity-compatible WAF subset for P1; full `libmodsecurity` and full OWASP CRS remain future work that needs pinned source/version/license/build/update/test planning before any claim of support.
 - [ ] Tambah per-virtual-host WAF controls jika diperlukan.
   - Done criteria: vhost boleh override enable/threshold/rule exception dari SQLite.
 - [ ] Tambah structured WAF audit log.

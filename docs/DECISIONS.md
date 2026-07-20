@@ -701,7 +701,7 @@ The project owner requested ModSecurity and OWASP rules to be built into the sys
 
 Consequence:
 
-The current WAF is useful but partial. It does not parse ModSecurity rule syntax, does not implement the full ModSecurity transaction phase model, does not bundle the full OWASP Core Rule Set, does not provide per-virtual-host rule tuning, and does not persist structured audit logs. Full `libmodsecurity` and full OWASP CRS source bundling remain planned and need version/license/build validation before being claimed. Needs verification.
+The current WAF is useful but partial. It does not parse ModSecurity rule syntax, does not implement the full ModSecurity transaction phase model, does not bundle the full OWASP Core Rule Set, does not provide per-virtual-host rule tuning, and does not persist structured audit logs. ADR-0034 later keeps the Rimau-native WAF for P1 and defers full `libmodsecurity` plus full OWASP CRS source bundling until version/license/build validation is accepted. Needs verification.
 
 ## ADR-0027: Version The SQLite Config Schema
 
@@ -868,3 +868,27 @@ Rimau currently accepts only bundled dependencies that are explicitly pinned, bu
 Consequence:
 
 HTTP/1.1 compression remains gzip-only. Brotli can be revisited later with a new ADR that pins the source dependency, build flags, deployment behavior, tests, and update process.
+
+## ADR-0034: Keep Rimau-Native WAF For P1
+
+- Date: 2026-07-20
+- Status: Accepted
+
+Decision:
+
+For P1, keep the current Rimau-native ModSecurity-compatible WAF subset and do not bundle full `libmodsecurity` or the full OWASP Core Rule Set yet.
+
+Implementation:
+
+- Continue using `rimau::http::inspect_request` and the compiled OWASP CRS-inspired subset in `src/http/waf.cpp`.
+- Continue exposing the existing SQLite keys: `modsecurity_enabled`, `modsecurity_owasp_crs_enabled`, `modsecurity_blocking_enabled`, `modsecurity_anomaly_threshold`, `modsecurity_max_inspection_bytes`, and `modsecurity_audit_log_enabled`.
+- Keep documentation explicit that the current engine is not full `libmodsecurity`, does not parse ModSecurity rule syntax, and does not bundle the full OWASP Core Rule Set.
+- Treat full `libmodsecurity` and full OWASP CRS as a future project that needs pinned source/version, license review, build plan, rule update process, regression corpus, performance tests, and rule tuning policy before implementation. Needs verification.
+
+Reason:
+
+The repository currently contains no vendored `libmodsecurity` source and no full OWASP Core Rule Set bundle. Adding them in P1 would expand dependency, license, rule-update, parser/phase-engine, performance, false-positive, and packaging scope beyond the current security stabilization work. The existing native WAF already has HTTP/1.1, WebSocket, WebSocket proxy, partial HTTP/2 block-path coverage and a false-positive corpus for normal traffic.
+
+Consequence:
+
+P1 security work continues on the native WAF: per-virtual-host controls, structured audit logging, fuzzing, and hardening. Full ModSecurity compatibility remains unimplemented and must not be claimed until source is actually bundled, rules are pinned, tests pass, and a new ADR accepts that integration.

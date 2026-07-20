@@ -3250,7 +3250,7 @@ private:
         return options;
     }
 
-    rimau::http::WafSettings waf_settings() const
+    rimau::http::WafSettings waf_settings(const rimau::http::Request& request) const
     {
         rimau::http::WafSettings settings;
         settings.enabled = config_->modsecurity_enabled;
@@ -3258,12 +3258,18 @@ private:
         settings.blocking_enabled = config_->modsecurity_blocking_enabled;
         settings.anomaly_threshold = config_->modsecurity_anomaly_threshold;
         settings.max_inspection_bytes = config_->modsecurity_max_inspection_bytes;
+        if (config_->virtual_hosts_enabled && !config_->virtual_host_waf_overrides.empty()) {
+            const auto overrides = rimau::http::parse_virtual_host_waf_overrides(config_->virtual_host_waf_overrides);
+            settings = rimau::http::apply_virtual_host_waf_override(
+                std::move(settings),
+                rimau::http::select_virtual_host_waf_override(request, overrides));
+        }
         return settings;
     }
 
     std::optional<rimau::http::Response> inspect_waf(const rimau::http::Request& request) const
     {
-        const auto result = rimau::http::inspect_request(request, waf_settings());
+        const auto result = rimau::http::inspect_request(request, waf_settings(request));
         if (!result.inspected || result.matches.empty()) {
             return std::nullopt;
         }

@@ -227,6 +227,7 @@ Supported keys:
 - `server_header_enabled`
 - `virtual_hosts_enabled`
 - `virtual_hosts`
+- `virtual_host_waf_overrides`
 - `reverse_proxy_connect_timeout_seconds`
 - `reverse_proxy_read_timeout_seconds`
 - `reverse_proxy_max_response_bytes`
@@ -407,6 +408,7 @@ Supported keys:
 - `server_header_enabled`
 - `virtual_hosts_enabled`
 - `virtual_hosts`
+- `virtual_host_waf_overrides`
 - `reverse_proxy_connect_timeout_seconds`
 - `reverse_proxy_read_timeout_seconds`
 - `reverse_proxy_max_response_bytes`
@@ -477,6 +479,7 @@ Examples:
 ./build/rimau-server --database data/rimau.sqlite3 --set modsecurity_anomaly_threshold=5
 ./build/rimau-server --database data/rimau.sqlite3 --set modsecurity_max_inspection_bytes=131072
 ./build/rimau-server --database data/rimau.sqlite3 --set modsecurity_audit_log_enabled=true
+./build/rimau-server --database data/rimau.sqlite3 --set "virtual_host_waf_overrides=site.test=enabled:false;api.test=threshold:10,rule_exceptions:930100|942100"
 ./build/rimau-server --database data/rimau.sqlite3 --check-config
 ./build/rimau-server --database data/rimau.sqlite3
 ```
@@ -493,6 +496,12 @@ The default `tls_certificate_file` and `tls_private_key_file` remain the fallbac
 
 ```text
 host=static:document-root;host=proxy:http://upstream:port/base,https://backup:port/base;host=script:runtime:script-root
+```
+
+`virtual_host_waf_overrides` uses semicolon-separated entries with comma-separated options:
+
+```text
+site.test=enabled:false;api.test=threshold:10,rule_exceptions:930100|942100;*.tenant.test=blocking:false
 ```
 
 SIGHUP reloads SQLite config values that can safely change without recreating listener sockets or worker threads. Dynamic values include `document_root`, `directory_index`, `error_page`, `max_request_bytes`, HTTP keep-alive settings, TCP keepalive settings for newly accepted sockets, protocol status flags, graceful shutdown timeout, request/header/body/idle timeout, rate-limit settings, IPv4/IPv6 IP allow/block lists, security header behavior/values, virtual host and reverse proxy settings, WAF settings, and TLS certificate/key/SNI/TLS settings for new TLS connections. Changes to bind address, port, listener backlog, worker count, epoll batch size, `SO_REUSEPORT`, connection pool sizing, HTTP/1 enablement, or `tls_enabled` require restart.
@@ -757,7 +766,7 @@ Missing:
 - Full parser hardening and fuzzing.
 - Fuzz testing.
 - Full `libmodsecurity` transaction engine integration and full OWASP Core Rule Set bundle are deferred beyond P1 by ADR-0034. Needs verification.
-- WAF rule tuning, per-virtual-host WAF overrides, structured audit log persistence, and ModSecurity rule syntax parsing.
+- Rich WAF rule tuning beyond ADR-0035, structured audit log persistence, and ModSecurity rule syntax parsing.
 - Advanced slow-client scoring.
 - Safe default production file permissions.
 - Reverse proxy request/response policy hardening beyond current hop-by-hop header stripping, buffered-size limit, WebSocket proxy handshake validation, passive circuit breaker, basic retry, and TLS transport.

@@ -16,6 +16,7 @@ struct WafSettings {
     bool blocking_enabled = true;
     std::size_t anomaly_threshold = 5;
     std::size_t max_inspection_bytes = 128 * 1024;
+    std::vector<int> disabled_rule_ids;
 };
 
 struct WafMatch {

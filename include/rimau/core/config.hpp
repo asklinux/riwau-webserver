@@ -67,6 +67,7 @@ struct ServerConfig {
     bool server_header_enabled = true;
     bool virtual_hosts_enabled = true;
     std::string virtual_hosts;
+    std::string virtual_host_waf_overrides;
     int reverse_proxy_connect_timeout_seconds = 5;
     int reverse_proxy_read_timeout_seconds = 30;
     std::size_t reverse_proxy_max_response_bytes = 1024 * 1024;

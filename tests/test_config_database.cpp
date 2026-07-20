@@ -143,6 +143,7 @@ int main()
         assert(config.server_header_enabled);
         assert(config.virtual_hosts_enabled);
         assert(config.virtual_hosts.empty());
+        assert(config.virtual_host_waf_overrides.empty());
         assert(config.reverse_proxy_connect_timeout_seconds == 5);
         assert(config.reverse_proxy_read_timeout_seconds == 30);
         assert(config.reverse_proxy_max_response_bytes == 1048576);
@@ -218,6 +219,7 @@ int main()
     rimau::core::set_config_value(database_path, "server_header_enabled", "false");
     rimau::core::set_config_value(database_path, "virtual_hosts_enabled", "true");
     rimau::core::set_config_value(database_path, "virtual_hosts", "site.test=static:public/site;api.test=proxy:http://127.0.0.1:19090,https://backend.test:9443;app.test=script:php:public/app");
+    rimau::core::set_config_value(database_path, "virtual_host_waf_overrides", "site.test=enabled:false,threshold:9,rule_exceptions:930100|942100;api.test=blocking:false");
     rimau::core::set_config_value(database_path, "reverse_proxy_connect_timeout_seconds", "2");
     rimau::core::set_config_value(database_path, "reverse_proxy_read_timeout_seconds", "4");
     rimau::core::set_config_value(database_path, "reverse_proxy_max_response_bytes", "32768");
@@ -290,6 +292,7 @@ int main()
         assert(!config.server_header_enabled);
         assert(config.virtual_hosts_enabled);
         assert(config.virtual_hosts == "site.test=static:public/site;api.test=proxy:http://127.0.0.1:19090,https://backend.test:9443;app.test=script:php:public/app");
+        assert(config.virtual_host_waf_overrides == "site.test=enabled:false,threshold:9,rule_exceptions:930100|942100;api.test=blocking:false");
         assert(config.reverse_proxy_connect_timeout_seconds == 2);
         assert(config.reverse_proxy_read_timeout_seconds == 4);
         assert(config.reverse_proxy_max_response_bytes == 32768);
@@ -532,6 +535,14 @@ int main()
         invalid_modsecurity_threshold_failed = true;
     }
     assert(invalid_modsecurity_threshold_failed);
+
+    bool invalid_virtual_host_waf_failed = false;
+    try {
+        rimau::core::set_config_value(database_path, "virtual_host_waf_overrides", "site.test=rule_exceptions:abc");
+    } catch (const std::runtime_error&) {
+        invalid_virtual_host_waf_failed = true;
+    }
+    assert(invalid_virtual_host_waf_failed);
 
     const auto legacy_database_path = make_database_path("rimau-config-legacy-test-");
     {

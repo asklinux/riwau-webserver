@@ -42,7 +42,7 @@ Current rules are a small OWASP CRS-inspired subset:
 - Do not claim the full OWASP Core Rule Set is bundled.
 - Do not parse ModSecurity rule syntax.
 - Do not implement the full ModSecurity phase engine.
-- Do not add per-virtual-host WAF overrides.
+- Per-virtual-host WAF overrides were out of scope for the initial WAF subset, but ADR-0035 later added SQLite `virtual_host_waf_overrides`.
 - Do not add persistent structured WAF audit logs.
 
 These remain `Needs verification` because they require dependency selection, source/version pinning, licensing review, update tooling, broader tests, and performance validation.

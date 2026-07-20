@@ -2,7 +2,7 @@
 
 Rimau Web Server ialah projek C++ untuk membina web server berprestasi tinggi dengan sasaran jangka panjang setanding kelas OpenLiteSpeed dan nginx.
 
-Status semasa: scaffold awal yang sudah mempunyai HTTP/1.1 praktikal. HTTP/1.1 menyokong GET/HEAD static serving, OPTIONS, POST/PUT/PATCH/DELETE JSON scaffold, Content-Length, chunked request decoding, keep-alive, basic pipelining, single-range responses, gzip static compression, basic WebSocket echo, WebSocket reverse proxy tunneling untuk proxy vhost, TLS hardening asas, timeout, rate limit, kawalan connection/IP, built-in ModSecurity-compatible WAF subset, virtual host static, dan reverse proxy baseline dengan HTTP/HTTPS upstream, multi-upstream round-robin asas, retry/failover asas, dan passive circuit breaker. HTTP/2 kini partial: frame codec, SETTINGS/PING, HPACK asas tanpa Huffman, decode literal incremental indexing tanpa dynamic-table persistence, cleartext h2c prior-knowledge request serving, dan TLS ALPN `h2` request serving asas melalui shared handler pipeline sudah ada. Flow control penuh, continuation assembly, dan production-grade stream/session behavior belum siap. HTTP/3 kini partial pada codec primitive: QUIC varint, frame, dan SETTINGS payload parser/serializer sudah ada, tetapi UDP/QUIC/QPACK/live request serving belum siap.
+Status semasa: scaffold awal yang sudah mempunyai HTTP/1.1 praktikal. HTTP/1.1 menyokong GET/HEAD static serving, OPTIONS, POST/PUT/PATCH/DELETE JSON scaffold, Content-Length, chunked request decoding, keep-alive, basic pipelining, single-range responses, gzip static compression, basic WebSocket echo, WebSocket reverse proxy tunneling untuk proxy vhost, TLS hardening asas, timeout, rate limit, kawalan connection/IP, built-in ModSecurity-compatible WAF subset dengan per-host overrides, virtual host static, dan reverse proxy baseline dengan HTTP/HTTPS upstream, multi-upstream round-robin asas, retry/failover asas, dan passive circuit breaker. HTTP/2 kini partial: frame codec, SETTINGS/PING, HPACK asas tanpa Huffman, decode literal incremental indexing tanpa dynamic-table persistence, cleartext h2c prior-knowledge request serving, dan TLS ALPN `h2` request serving asas melalui shared handler pipeline sudah ada. Flow control penuh, continuation assembly, dan production-grade stream/session behavior belum siap. HTTP/3 kini partial pada codec primitive: QUIC varint, frame, dan SETTINGS payload parser/serializer sudah ada, tetapi UDP/QUIC/QPACK/live request serving belum siap.
 
 Seni bina request pipeline mengambil inspirasi konsep daripada Proxygen, tetapi kod Proxygen tidak disalin ke projek ini.
 
@@ -167,6 +167,7 @@ Contoh ubah config:
 ./build/rimau-server --database data/rimau.sqlite3 --set modsecurity_anomaly_threshold=5
 ./build/rimau-server --database data/rimau.sqlite3 --set modsecurity_max_inspection_bytes=131072
 ./build/rimau-server --database data/rimau.sqlite3 --set modsecurity_audit_log_enabled=true
+./build/rimau-server --database data/rimau.sqlite3 --set "virtual_host_waf_overrides=site.test=enabled:false;api.test=threshold:10,rule_exceptions:930100|942100"
 ./build/rimau-server --database data/rimau.sqlite3 --check-config
 ./build/rimau-server --database data/rimau.sqlite3 --protocols
 ```
@@ -183,6 +184,12 @@ Contoh:
 
 ```bash
 ./build/rimau-server --database data/rimau.sqlite3 --set "virtual_hosts=site.test=static:public/site;*.tenant.test=static:public/tenant;api.test=proxy:http://127.0.0.1:9000/api,https://127.0.0.1:9443/api;app.test=script:php:public/app"
+```
+
+`virtual_host_waf_overrides` juga dipisahkan `;` dan guna option dipisahkan koma:
+
+```bash
+./build/rimau-server --database data/rimau.sqlite3 --set "virtual_host_waf_overrides=site.test=enabled:false;api.test=threshold:10,rule_exceptions:930100|942100;*.tenant.test=blocking:false"
 ```
 
 Static vhost melayan fail dari document root host tersebut. Proxy vhost menghantar request kepada upstream HTTP/1.1 dan menyalin response kembali kepada client. Jika request ialah WebSocket Upgrade, Rimau membuat upstream WebSocket handshake dan kemudian tunnel data dua hala melalui worker `epoll` yang sama. Jika beberapa upstream diberi, Rimau memilih secara round-robin asas dan boleh retry ke upstream seterusnya mengikut `reverse_proxy_retry_count`. Upstream yang gagal berulang kali boleh dipintas sementara oleh passive circuit breaker dan akan menghasilkan `503 Service Unavailable` jika semua target terbuka circuit-nya. Script vhost hanya declaration buat masa ini dan akan pulang `501` sehingga runtime bundled sebenar dipilih dan diintegrasi.

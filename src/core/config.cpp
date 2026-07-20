@@ -142,7 +142,7 @@ bool is_optional_string_key(const std::string& key)
         || key == "security_header_content_security_policy" || key == "security_header_strict_transport_security"
         || key == "security_header_x_content_type_options" || key == "security_header_x_frame_options"
         || key == "security_header_referrer_policy" || key == "security_header_cross_origin_opener_policy"
-        || key == "virtual_hosts" || key == "error_page";
+        || key == "virtual_hosts" || key == "virtual_host_waf_overrides" || key == "error_page";
 }
 
 bool contains_control_character(const std::string& value)
@@ -366,6 +366,7 @@ const std::vector<ConfigDefault>& config_defaults()
         { "server_header_enabled", "true", "Emit Server header in HTTP responses" },
         { "virtual_hosts_enabled", "true", "Enable Host header based virtual host routing" },
         { "virtual_hosts", "", "Semicolon-separated host=static:path, host=proxy:http://host:port,https://backup:port, or host=script:runtime:path routes" },
+        { "virtual_host_waf_overrides", "", "Semicolon-separated WAF overrides: host=enabled:true,threshold:10,rule_exceptions:930100|942100" },
         { "reverse_proxy_connect_timeout_seconds", "5", "HTTP reverse proxy upstream connect timeout" },
         { "reverse_proxy_read_timeout_seconds", "30", "HTTP reverse proxy upstream read timeout" },
         { "reverse_proxy_max_response_bytes", "1048576", "Maximum buffered reverse proxy upstream response bytes" },
@@ -686,7 +687,7 @@ void validate_config_value(const std::string& key, const std::string& value)
         || key == "security_header_content_security_policy" || key == "security_header_strict_transport_security"
         || key == "security_header_x_content_type_options" || key == "security_header_x_frame_options"
         || key == "security_header_referrer_policy" || key == "security_header_cross_origin_opener_policy"
-        || key == "virtual_hosts") {
+        || key == "virtual_hosts" || key == "virtual_host_waf_overrides") {
         if (contains_control_character(value)) {
             throw std::runtime_error(key + " cannot contain control characters");
         }
@@ -701,6 +702,9 @@ void validate_config_value(const std::string& key, const std::string& value)
         }
         if (key == "virtual_hosts") {
             (void)rimau::http::parse_virtual_host_rules(value);
+        }
+        if (key == "virtual_host_waf_overrides") {
+            (void)rimau::http::parse_virtual_host_waf_overrides(value);
         }
     } else if (key == "http_keep_alive_enabled" || key == "reuse_port_enabled" || key == "tcp_keepalive_enabled" || key == "http1_enabled" || key == "http2_enabled" || key == "http3_enabled" || key == "tls_enabled" || key == "tls_sni_required" || key == "rate_limit_enabled" || key == "security_headers_enabled" || key == "server_header_enabled" || key == "virtual_hosts_enabled" || key == "reverse_proxy_tls_verify_upstream" || key == "reverse_proxy_circuit_breaker_enabled" || key == "modsecurity_enabled" || key == "modsecurity_owasp_crs_enabled" || key == "modsecurity_blocking_enabled" || key == "modsecurity_audit_log_enabled") {
         parse_bool(value, key.c_str());
@@ -765,6 +769,7 @@ ServerConfig build_config(const std::map<std::string, std::string>& values)
     config.server_header_enabled = parse_bool(value_or_default(values, "server_header_enabled"), "server_header_enabled");
     config.virtual_hosts_enabled = parse_bool(value_or_default(values, "virtual_hosts_enabled"), "virtual_hosts_enabled");
     config.virtual_hosts = value_or_default(values, "virtual_hosts");
+    config.virtual_host_waf_overrides = value_or_default(values, "virtual_host_waf_overrides");
     config.reverse_proxy_connect_timeout_seconds = parse_positive_int(value_or_default(values, "reverse_proxy_connect_timeout_seconds"), "reverse_proxy_connect_timeout_seconds");
     config.reverse_proxy_read_timeout_seconds = parse_positive_int(value_or_default(values, "reverse_proxy_read_timeout_seconds"), "reverse_proxy_read_timeout_seconds");
     config.reverse_proxy_max_response_bytes = parse_size(value_or_default(values, "reverse_proxy_max_response_bytes"), "reverse_proxy_max_response_bytes");
@@ -813,6 +818,7 @@ ServerConfig build_config(const std::map<std::string, std::string>& values)
     ensure_no_control("security_header_referrer_policy", config.security_header_referrer_policy);
     ensure_no_control("security_header_cross_origin_opener_policy", config.security_header_cross_origin_opener_policy);
     ensure_no_control("virtual_hosts", config.virtual_hosts);
+    ensure_no_control("virtual_host_waf_overrides", config.virtual_host_waf_overrides);
     if (!valid_tls_version(config.tls_min_version)) {
         throw std::runtime_error("tls_min_version must be TLSv1.2 or TLSv1.3");
     }
@@ -836,6 +842,7 @@ ServerConfig build_config(const std::map<std::string, std::string>& values)
         throw std::runtime_error("ip_blocklist must contain IPv4/IPv6 exact addresses or CIDR ranges");
     }
     (void)rimau::http::parse_virtual_host_rules(config.virtual_hosts);
+    (void)rimau::http::parse_virtual_host_waf_overrides(config.virtual_host_waf_overrides);
     if (config.tls_certificate_file.empty()) {
         throw std::runtime_error("tls_certificate_file cannot be empty");
     }
@@ -981,6 +988,7 @@ std::string describe_config(const ServerConfig& config)
            << ", server_header_enabled=" << (config.server_header_enabled ? "true" : "false")
            << ", virtual_hosts_enabled=" << (config.virtual_hosts_enabled ? "true" : "false")
            << ", virtual_hosts=" << config.virtual_hosts
+           << ", virtual_host_waf_overrides=" << config.virtual_host_waf_overrides
            << ", reverse_proxy_connect_timeout_seconds=" << config.reverse_proxy_connect_timeout_seconds
            << ", reverse_proxy_read_timeout_seconds=" << config.reverse_proxy_read_timeout_seconds
            << ", reverse_proxy_max_response_bytes=" << config.reverse_proxy_max_response_bytes

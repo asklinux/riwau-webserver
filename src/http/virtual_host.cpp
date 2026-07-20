@@ -1024,6 +1024,109 @@ std::vector<VirtualHostRule> parse_virtual_host_rules(std::string_view value)
     return rules;
 }
 
+bool parse_waf_override_bool(const std::string& value, std::string_view key)
+{
+    const auto normalized = lowercase(trim(value));
+    if (normalized == "1" || normalized == "true" || normalized == "yes" || normalized == "on") {
+        return true;
+    }
+    if (normalized == "0" || normalized == "false" || normalized == "no" || normalized == "off") {
+        return false;
+    }
+    throw std::runtime_error("virtual_host_waf_overrides " + std::string(key) + " must be a boolean");
+}
+
+std::size_t parse_waf_override_size(const std::string& value, std::string_view key)
+{
+    try {
+        std::size_t consumed = 0;
+        const unsigned long long parsed = std::stoull(value, &consumed);
+        if (consumed != value.size() || parsed == 0) {
+            throw std::runtime_error("virtual_host_waf_overrides " + std::string(key) + " must be greater than zero");
+        }
+        return static_cast<std::size_t>(parsed);
+    } catch (const std::invalid_argument&) {
+        throw std::runtime_error("virtual_host_waf_overrides " + std::string(key) + " must be a number");
+    } catch (const std::out_of_range&) {
+        throw std::runtime_error("virtual_host_waf_overrides " + std::string(key) + " is out of range");
+    }
+}
+
+int parse_waf_rule_id(const std::string& value)
+{
+    try {
+        std::size_t consumed = 0;
+        const int parsed = std::stoi(value, &consumed);
+        if (consumed != value.size() || parsed <= 0) {
+            throw std::runtime_error("virtual_host_waf_overrides rule_exceptions must contain positive rule ids");
+        }
+        return parsed;
+    } catch (const std::invalid_argument&) {
+        throw std::runtime_error("virtual_host_waf_overrides rule_exceptions must contain numeric rule ids");
+    } catch (const std::out_of_range&) {
+        throw std::runtime_error("virtual_host_waf_overrides rule_exceptions rule id is out of range");
+    }
+}
+
+std::vector<VirtualHostWafOverride> parse_virtual_host_waf_overrides(std::string_view value)
+{
+    std::vector<VirtualHostWafOverride> overrides;
+    for (const auto& entry : split_delimited(value, ';')) {
+        const auto equals = entry.find('=');
+        if (equals == std::string::npos) {
+            throw std::runtime_error("virtual_host_waf_overrides entries must use host=option:value");
+        }
+
+        VirtualHostWafOverride override;
+        override.host_pattern = lowercase(trim(entry.substr(0, equals)));
+        if (!valid_host_pattern(override.host_pattern)) {
+            throw std::runtime_error("virtual_host_waf_overrides host pattern is invalid: " + override.host_pattern);
+        }
+
+        const auto options = split_delimited(entry.substr(equals + 1), ',');
+        if (options.empty()) {
+            throw std::runtime_error("virtual_host_waf_overrides entry must include at least one option");
+        }
+
+        for (const auto& option : options) {
+            const auto separator = option.find(':');
+            if (separator == std::string::npos) {
+                throw std::runtime_error("virtual_host_waf_overrides options must use key:value");
+            }
+
+            const auto key = lowercase(trim(option.substr(0, separator)));
+            const auto option_value = trim(option.substr(separator + 1));
+            if (option_value.empty()) {
+                throw std::runtime_error("virtual_host_waf_overrides option value cannot be empty");
+            }
+
+            if (key == "enabled") {
+                override.enabled = parse_waf_override_bool(option_value, key);
+            } else if (key == "owasp_crs") {
+                override.owasp_crs_enabled = parse_waf_override_bool(option_value, key);
+            } else if (key == "blocking") {
+                override.blocking_enabled = parse_waf_override_bool(option_value, key);
+            } else if (key == "threshold") {
+                override.anomaly_threshold = parse_waf_override_size(option_value, key);
+            } else if (key == "rule_exceptions") {
+                override.rule_exceptions.clear();
+                for (const auto& id : split_delimited(option_value, '|')) {
+                    override.rule_exceptions.push_back(parse_waf_rule_id(id));
+                }
+                if (override.rule_exceptions.empty()) {
+                    throw std::runtime_error("virtual_host_waf_overrides rule_exceptions cannot be empty");
+                }
+            } else {
+                throw std::runtime_error("virtual_host_waf_overrides unknown option: " + key);
+            }
+        }
+
+        overrides.push_back(std::move(override));
+    }
+
+    return overrides;
+}
+
 const VirtualHostRule* select_virtual_host_rule(const Request& request, const std::vector<VirtualHostRule>& rules)
 {
     const auto host_header = request.header("host");
@@ -1049,6 +1152,55 @@ const VirtualHostRule* select_virtual_host_rule(const Request& request, const st
     }
 
     return nullptr;
+}
+
+const VirtualHostWafOverride* select_virtual_host_waf_override(const Request& request, const std::vector<VirtualHostWafOverride>& overrides)
+{
+    const auto host_header = request.header("host");
+    if (!host_header) {
+        return nullptr;
+    }
+
+    const auto host = normalize_host(*host_header);
+    if (host.empty()) {
+        return nullptr;
+    }
+
+    for (const auto& override : overrides) {
+        if (!override.host_pattern.starts_with("*.") && hostname_matches_pattern(host, override.host_pattern)) {
+            return &override;
+        }
+    }
+
+    for (const auto& override : overrides) {
+        if (override.host_pattern.starts_with("*.") && hostname_matches_pattern(host, override.host_pattern)) {
+            return &override;
+        }
+    }
+
+    return nullptr;
+}
+
+WafSettings apply_virtual_host_waf_override(WafSettings settings, const VirtualHostWafOverride* override)
+{
+    if (!override) {
+        return settings;
+    }
+
+    if (override->enabled) {
+        settings.enabled = *override->enabled;
+    }
+    if (override->owasp_crs_enabled) {
+        settings.owasp_crs_enabled = *override->owasp_crs_enabled;
+    }
+    if (override->blocking_enabled) {
+        settings.blocking_enabled = *override->blocking_enabled;
+    }
+    if (override->anomaly_threshold) {
+        settings.anomaly_threshold = *override->anomaly_threshold;
+    }
+    settings.disabled_rule_ids.insert(settings.disabled_rule_ids.end(), override->rule_exceptions.begin(), override->rule_exceptions.end());
+    return settings;
 }
 
 bool reverse_proxy_upstream_available(const ReverseProxyTarget& upstream, const ReverseProxySettings& settings)

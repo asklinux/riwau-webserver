@@ -8,6 +8,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <utility>
 
 namespace {
 
@@ -90,6 +91,40 @@ int main()
         assert(parsed[3].script_runtime == "php");
     }
 
+    {
+        const auto overrides = rimau::http::parse_virtual_host_waf_overrides(
+            "site.test=enabled:false,threshold:10,rule_exceptions:930100|942100;*.wild.test=blocking:false");
+        assert(overrides.size() == 2);
+        assert(overrides[0].host_pattern == "site.test");
+        assert(overrides[0].enabled);
+        assert(!*overrides[0].enabled);
+        assert(overrides[0].anomaly_threshold == 10);
+        assert(overrides[0].rule_exceptions.size() == 2);
+        assert(overrides[0].rule_exceptions[0] == 930100);
+        assert(overrides[0].rule_exceptions[1] == 942100);
+
+        rimau::http::WafSettings settings;
+        settings.enabled = true;
+        settings.blocking_enabled = true;
+        settings.anomaly_threshold = 5;
+        settings = rimau::http::apply_virtual_host_waf_override(
+            std::move(settings),
+            rimau::http::select_virtual_host_waf_override(make_request("site.test"), overrides));
+        assert(!settings.enabled);
+        assert(settings.blocking_enabled);
+        assert(settings.anomaly_threshold == 10);
+        assert(settings.disabled_rule_ids.size() == 2);
+
+        rimau::http::WafSettings wildcard_settings;
+        wildcard_settings.enabled = true;
+        wildcard_settings.blocking_enabled = true;
+        wildcard_settings = rimau::http::apply_virtual_host_waf_override(
+            std::move(wildcard_settings),
+            rimau::http::select_virtual_host_waf_override(make_request("one.wild.test:8080"), overrides));
+        assert(wildcard_settings.enabled);
+        assert(!wildcard_settings.blocking_enabled);
+    }
+
     rimau::http::ReverseProxySettings proxy_settings;
     rimau::http::VirtualHostHandlerFactory factory(default_root, rules, proxy_settings);
 
@@ -149,6 +184,22 @@ int main()
         invalid_scheme_failed = true;
     }
     assert(invalid_scheme_failed);
+
+    bool invalid_waf_option_failed = false;
+    try {
+        (void)rimau::http::parse_virtual_host_waf_overrides("site.test=unknown:true");
+    } catch (const std::runtime_error&) {
+        invalid_waf_option_failed = true;
+    }
+    assert(invalid_waf_option_failed);
+
+    bool invalid_waf_rule_failed = false;
+    try {
+        (void)rimau::http::parse_virtual_host_waf_overrides("site.test=rule_exceptions:abc");
+    } catch (const std::runtime_error&) {
+        invalid_waf_rule_failed = true;
+    }
+    assert(invalid_waf_rule_failed);
 
     {
         auto upstream = rimau::http::parse_reverse_proxy_target("http://203.0.113.77:19555/circuit-test");

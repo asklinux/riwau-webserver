@@ -49,6 +49,7 @@ Implemented:
 - Fully static `rimau-server` link pada Linux x86_64 GNU/Clang melalui bundled glibc sysroot apabila `RIMAU_FULLY_STATIC_SERVER=ON` dan `RIMAU_USE_BUNDLED_GLIBC=ON`
 - In-memory per-process security state untuk global/per-IP connection limit dan fixed-window rate limiting
 - Built-in ModSecurity-compatible WAF dengan subset OWASP CRS-inspired rules untuk scanner user-agent, request splitting/CRLF, path traversal, XSS, SQLi, RCE, PHP wrapper injection, dan Java/JNDI exploit patterns
+- SQLite `virtual_host_waf_overrides` untuk per-host WAF enable/disable, CRS/blocking override, anomaly threshold override, dan numeric rule exceptions
 - IPv4/IPv6 exact/CIDR IP allowlist dan blocklist
 - SQLite-configurable HTTP security header values
 - SQLite-configured virtual host routing melalui HTTP `Host` header dengan exact host dan wildcard ringkas `*.domain`
@@ -239,6 +240,7 @@ Configure virtual hosts:
 ./build/rimau-server --database data/rimau.sqlite3 --set modsecurity_anomaly_threshold=5
 ./build/rimau-server --database data/rimau.sqlite3 --set modsecurity_max_inspection_bytes=131072
 ./build/rimau-server --database data/rimau.sqlite3 --set modsecurity_audit_log_enabled=true
+./build/rimau-server --database data/rimau.sqlite3 --set "virtual_host_waf_overrides=site.test=enabled:false;api.test=threshold:10,rule_exceptions:930100|942100"
 ```
 
 Check bundled OpenSSL:
@@ -371,6 +373,7 @@ Production deployment, service manager, packaging, container, TLS certificate ha
 - Multi-upstream reverse proxy dengan round-robin asas dan retry/failover asas.
 - Passive reverse proxy circuit breaker in-memory per process dengan threshold/cooldown SQLite.
 - Built-in ModSecurity-compatible WAF untuk HTTP/1.1, WebSocket upgrade, WebSocket proxy upgrade, dan partial HTTP/2 request path. Rule set semasa ialah subset OWASP CRS-inspired yang dikompil dalam kod Rimau, bukan full `libmodsecurity` atau full OWASP CRS.
+- Per-host WAF overrides dari SQLite `virtual_host_waf_overrides` untuk `enabled`, `owasp_crs`, `blocking`, `threshold`, dan `rule_exceptions`.
 - Script virtual host declaration dengan runtime name seperti `php`, `python`, atau `perl`; execution belum implemented dan response semasa ialah `501`.
 - HTTP/1.1 keep-alive.
 - SIGHUP reload untuk dynamic SQLite config seperti `document_root`, `directory_index`, `error_page`, `max_request_bytes`, HTTP keep-alive settings, timeout, security limit, IP list, dan TLS certificate/key/TLS settings untuk sambungan baharu; listener dan worker changes masih memerlukan restart.
@@ -380,6 +383,7 @@ Production deployment, service manager, packaging, container, TLS certificate ha
 - Handler pipeline test asas melalui CTest.
 - HTTP/1.1 session/framing test melalui CTest tanpa socket event loop.
 - HTTP/1.1 network integration test melalui CTest untuk keep-alive, max request cap, request/header/body/idle timeout, pipelining, chunked body, request-smuggling rejection, rate limiting, connection limits, slow-client behavior, WAF block paths untuk HTTP/1.1/WebSocket/WebSocket proxy/partial HTTP/2, range, gzip, directory index, custom error page, WebSocket echo, dan WebSocket proxy.
+- HTTP/1.1 network integration test juga meliputi `virtual_host_waf_overrides` untuk default WAF block dan per-host allow path melalui `enabled:false`, `rule_exceptions`, dan threshold lebih tinggi.
 - WAF false-positive regression corpus melalui CTest untuk trafik normal curl, browser navigation/static asset, JSON API, form submission, dan WebSocket upgrade.
 - SQLite config database test asas melalui CTest.
 - CLI integration test melalui CTest untuk `--database`, `--set`, `--check-config`, dan `--protocols`.
@@ -401,7 +405,7 @@ Production deployment, service manager, packaging, container, TLS certificate ha
 - Event loop performance architecture: Partial with Linux `epoll` backend.
 - Virtual hosts: Partial; exact host, simple wildcard, static document root, proxy route, and script declaration are implemented.
 - Reverse proxy: Partial; HTTP/HTTPS upstream, buffered response untuk HTTP biasa, WebSocket tunnel untuk proxy vhost, round-robin asas, retry/failover asas, dan passive circuit breaker are implemented.
-- WAF/ModSecurity: Partial; SQLite-configurable built-in ModSecurity-compatible WAF with OWASP CRS-inspired subset rules is implemented. ADR-0034 keeps this Rimau-native WAF for P1. Full `libmodsecurity` integration and full OWASP Core Rule Set bundle are deferred beyond P1 and need pinned source/version/license/build/update/test planning before implementation. Needs verification.
+- WAF/ModSecurity: Partial; SQLite-configurable built-in ModSecurity-compatible WAF with OWASP CRS-inspired subset rules and per-host overrides is implemented. ADR-0034 keeps this Rimau-native WAF for P1. Full `libmodsecurity` integration and full OWASP Core Rule Set bundle are deferred beyond P1 and need pinned source/version/license/build/update/test planning before implementation. Needs verification.
 - Server-side language runtimes: Planned; declarations exist but PHP/Python/Perl execution is not implemented.
 - Access log format: Partial through stderr logger only.
 - Config reload: Partial for restart-free dynamic SQLite values.
@@ -430,7 +434,7 @@ Production deployment, service manager, packaging, container, TLS certificate ha
 - TLS request serving implemented untuk HTTP/1.1 dan partial HTTP/2 ALPN `h2`; ALPN `h3` belum diiklankan kerana HTTP/3 live request serving belum implemented.
 - TLS certificate/key reload hanya untuk sambungan baharu; sambungan TLS sedia ada terus menggunakan context lama.
 - Rate limiting dan connection counters adalah in-memory per process, bukan distributed.
-- WAF semasa ialah signature/anomaly engine ringkas terbina dalam. Ia bukan full ModSecurity transaction engine, tidak membaca syntax rule ModSecurity sebenar, tidak bundle full OWASP Core Rule Set, tiada phase engine lengkap, tiada persistent audit log berstruktur, dan rule tuning/exception per virtual host belum implemented. ADR-0034 defers full ModSecurity/libmodsecurity + OWASP CRS integration beyond P1. Needs verification.
+- WAF semasa ialah signature/anomaly engine ringkas terbina dalam. Ia bukan full ModSecurity transaction engine, tidak membaca syntax rule ModSecurity sebenar, tidak bundle full OWASP Core Rule Set, tiada phase engine lengkap, dan tiada persistent audit log berstruktur. Per-host override asas sudah ada melalui `virtual_host_waf_overrides`, tetapi tiada per-path/per-parameter/tag-based rule exclusion language. ADR-0034 defers full ModSecurity/libmodsecurity + OWASP CRS integration beyond P1. Needs verification.
 - Security header names masih fixed set; nilainya boleh dikonfigurasi atau dikosongkan melalui SQLite.
 - SIGHUP reload tidak menukar listener bind, worker count, HTTP/1 enablement, TLS enabled mode, atau connection pool sizing; ubah nilai tersebut memerlukan restart.
 - Dev certificate self-signed tidak sesuai untuk production.

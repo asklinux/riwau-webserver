@@ -71,8 +71,9 @@ Untuk setiap item:
 - [x] Decide full `libmodsecurity` + full OWASP CRS atau kekal Rimau-native WAF.
   - Done criteria: ADR accepted dengan source/version/license/build plan atau keputusan untuk tidak bundle.
   - Status: ADR-0034 accepted keeping the Rimau-native ModSecurity-compatible WAF subset for P1; full `libmodsecurity` and full OWASP CRS remain future work that needs pinned source/version/license/build/update/test planning before any claim of support.
-- [ ] Tambah per-virtual-host WAF controls jika diperlukan.
+- [x] Tambah per-virtual-host WAF controls jika diperlukan.
   - Done criteria: vhost boleh override enable/threshold/rule exception dari SQLite.
+  - Status: SQLite `virtual_host_waf_overrides` supports per-host `enabled`, `owasp_crs`, `blocking`, `threshold`, and numeric `rule_exceptions`; HTTP/1.1 network integration verifies default WAF blocking and host override allow paths.
 - [ ] Tambah structured WAF audit log.
   - Done criteria: format audit jelas, tidak bocor secret, dan ada retention/rotation guidance.
 - [ ] Tambah parser/framing fuzz tests.

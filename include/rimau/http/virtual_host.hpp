@@ -3,11 +3,13 @@
 #include "rimau/http/request.hpp"
 #include "rimau/http/request_handler_factory.hpp"
 #include "rimau/http/response.hpp"
+#include "rimau/http/waf.hpp"
 
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -48,12 +50,24 @@ struct VirtualHostRule {
     std::filesystem::path script_root;
 };
 
+struct VirtualHostWafOverride {
+    std::string host_pattern;
+    std::optional<bool> enabled;
+    std::optional<bool> owasp_crs_enabled;
+    std::optional<bool> blocking_enabled;
+    std::optional<std::size_t> anomaly_threshold;
+    std::vector<int> rule_exceptions;
+};
+
 std::string normalize_host(std::string_view host_header);
 ReverseProxyTarget parse_reverse_proxy_target(std::string_view value);
 std::vector<ReverseProxyTarget> parse_reverse_proxy_targets(std::string_view value);
 std::string reverse_proxy_target_path(const ReverseProxyTarget& upstream, std::string_view request_target);
 std::vector<VirtualHostRule> parse_virtual_host_rules(std::string_view value);
 const VirtualHostRule* select_virtual_host_rule(const Request& request, const std::vector<VirtualHostRule>& rules);
+std::vector<VirtualHostWafOverride> parse_virtual_host_waf_overrides(std::string_view value);
+const VirtualHostWafOverride* select_virtual_host_waf_override(const Request& request, const std::vector<VirtualHostWafOverride>& overrides);
+WafSettings apply_virtual_host_waf_override(WafSettings settings, const VirtualHostWafOverride* override);
 bool reverse_proxy_upstream_available(const ReverseProxyTarget& upstream, const ReverseProxySettings& settings);
 void record_reverse_proxy_upstream_success(const ReverseProxyTarget& upstream, const ReverseProxySettings& settings);
 void record_reverse_proxy_upstream_failure(const ReverseProxyTarget& upstream, const ReverseProxySettings& settings);

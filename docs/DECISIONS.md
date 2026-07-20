@@ -701,7 +701,7 @@ The project owner requested ModSecurity and OWASP rules to be built into the sys
 
 Consequence:
 
-The current WAF is useful but partial. It does not parse ModSecurity rule syntax, does not implement the full ModSecurity transaction phase model, does not bundle the full OWASP Core Rule Set, does not provide per-virtual-host rule tuning, and does not persist structured audit logs. ADR-0034 later keeps the Rimau-native WAF for P1 and defers full `libmodsecurity` plus full OWASP CRS source bundling until version/license/build validation is accepted. Needs verification.
+The current WAF is useful but partial. It does not parse ModSecurity rule syntax, does not implement the full ModSecurity transaction phase model, does not bundle the full OWASP Core Rule Set, and does not persist structured audit logs. ADR-0034 later keeps the Rimau-native WAF for P1 and defers full `libmodsecurity` plus full OWASP CRS source bundling until version/license/build validation is accepted. ADR-0035 later adds basic per-virtual-host WAF overrides. Needs verification.
 
 ## ADR-0027: Version The SQLite Config Schema
 
@@ -892,3 +892,38 @@ The repository currently contains no vendored `libmodsecurity` source and no ful
 Consequence:
 
 P1 security work continues on the native WAF: per-virtual-host controls, structured audit logging, fuzzing, and hardening. Full ModSecurity compatibility remains unimplemented and must not be claimed until source is actually bundled, rules are pinned, tests pass, and a new ADR accepts that integration.
+
+## ADR-0035: Add SQLite Per-Virtual-Host WAF Overrides
+
+- Date: 2026-07-20
+- Status: Accepted
+
+Decision:
+
+Add a SQLite-backed `virtual_host_waf_overrides` config key for host-pattern-specific WAF tuning.
+
+Format:
+
+`virtual_host_waf_overrides` uses semicolon-separated entries:
+
+```text
+host=enabled:false,threshold:10,rule_exceptions:930100|942100
+```
+
+Supported option keys are:
+
+- `enabled`: boolean override for WAF inspection.
+- `owasp_crs`: boolean override for the built-in OWASP CRS-inspired subset.
+- `blocking`: boolean override for blocking mode.
+- `threshold`: positive integer anomaly threshold.
+- `rule_exceptions`: `|`-separated numeric rule ids to disable for the matched host pattern.
+
+Host patterns use the same exact and simple `*.domain` wildcard matching rules as `virtual_hosts`.
+
+Reason:
+
+The project already has virtual host routing and a global WAF. Production sites often need different anomaly thresholds or narrowly-scoped false-positive exclusions per host. Keeping the override in SQLite matches the project rule that runtime config is database-backed, not file-backed.
+
+Consequence:
+
+This is basic per-host WAF tuning, not full ModSecurity rule exclusion syntax. Rule exceptions disable matching by numeric built-in rule id for the selected host pattern only. There is no per-path, per-parameter, phase-specific, tag-based, or time-bound exclusion language yet. Needs verification if a richer policy model is required.

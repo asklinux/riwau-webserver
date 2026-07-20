@@ -54,6 +54,7 @@ Implemented:
 - Per-IP fixed-window request rate limiting.
 - SQLite-configurable built-in ModSecurity-compatible WAF with OWASP CRS-inspired subset rules.
 - ADR-0034 keeps the Rimau-native ModSecurity-compatible WAF subset for P1 and defers full `libmodsecurity` plus full OWASP CRS bundling.
+- SQLite `virtual_host_waf_overrides` for per-host WAF enable/CRS/blocking/threshold overrides and numeric rule exceptions.
 - IPv4/IPv6 exact/CIDR allowlist and blocklist.
 - Configurable WebSocket max frame size.
 - SQLite-configurable default security header values and configurable `Server` header emission.
@@ -113,7 +114,7 @@ Partial:
 - TLS is partial; production certificate lifecycle and OCSP are not implemented. HTTP/2 ALPN `h2` request serving exists only as a partial basic path, not production-complete HTTP/2.
 - Virtual hosts are partial; exact host, simple wildcard, static roots, proxy rules, and script declarations exist, but rewrite rules and richer routing are not implemented.
 - Reverse proxy is partial; HTTP/HTTPS upstream, optional default-trust-path certificate verification, buffered normal HTTP response, WebSocket tunnel data path through worker `epoll`, basic hop-by-hop header stripping, basic round-robin, retry/failover, and passive circuit breaker exist. Per-upstream HTTPS verification policy, normal HTTP proxy streaming, advanced load balancing, active health checks, and upstream connection pooling are not implemented.
-- ModSecurity/WAF is partial; a built-in ModSecurity-compatible anomaly-scoring WAF with OWASP CRS-inspired subset rules exists, but full `libmodsecurity` and full OWASP Core Rule Set are not bundled or implemented. ADR-0034 defers full bundling beyond P1. Needs verification.
+- ModSecurity/WAF is partial; a built-in ModSecurity-compatible anomaly-scoring WAF with OWASP CRS-inspired subset rules and basic per-host overrides exists, but full `libmodsecurity` and full OWASP Core Rule Set are not bundled or implemented. ADR-0034 defers full bundling beyond P1. Needs verification.
 - HTTP/2 and HTTP/3 support is partial: tested wire codec primitives exist, HTTP/2 has cleartext h2c and TLS ALPN `h2` request serving basics, and HTTP/3 remains wire-codec-only.
 - Server-side language support is planned only; PHP/Python/Perl runtime execution is not bundled or implemented.
 - Static glibc DNS/NSS hostname behavior for reverse proxy upstream hostnames still needs production validation because the static linker warns on `getaddrinfo` and OpenSSL `gethostbyname`. Needs verification.
@@ -152,8 +153,8 @@ Semasa pemeriksaan awal pada 2026-07-18:
 | Server-side runtimes | Planned | `script:runtime:path` config returns `501`; PHP/Python/Perl are not bundled or executed yet. |
 | Request pipeline | Partial | Handler/factory/transaction/response sink implemented for static, vhost, reverse proxy, and script-placeholder HTTP/1.1. |
 | Config | Partial | SQLite table `rimau_config`, schema metadata table `rimau_schema_migrations`, protocol, TLS, keep-alive, static file, timeout, rate-limit, IP-list, security-header, virtual-host/proxy keys, and limited SIGHUP reload behavior. |
-| Security | Partial | Baseline HTTP framing hardening, timeout, rate limit, connection limit, built-in ModSecurity-compatible WAF subset, configurable security header values, and IPv4/IPv6 IP allow/block list are implemented; fuzzing and production hardening remain pending, while full ModSecurity/CRS integration is deferred beyond P1 by ADR-0034. |
-| Tests | Partial | Parser, HTTP/1.1 session/framing, HTTP/1.1 network integration including request-smuggling rejection, rate limiting, connection limits, request/header/body/idle timeout slow-client behavior, and WAF block paths for HTTP/1.1/WebSocket/WebSocket proxy/partial HTTP/2, WAF false-positive corpus, response serializer, handler pipeline, SQLite config, CLI config, protocol capability, HTTP/2 wire, HTTP/3 wire, virtual host, and WAF tests. |
+| Security | Partial | Baseline HTTP framing hardening, timeout, rate limit, connection limit, built-in ModSecurity-compatible WAF subset with per-host overrides, configurable security header values, and IPv4/IPv6 IP allow/block list are implemented; fuzzing and production hardening remain pending, while full ModSecurity/CRS integration is deferred beyond P1 by ADR-0034. |
+| Tests | Partial | Parser, HTTP/1.1 session/framing, HTTP/1.1 network integration including request-smuggling rejection, rate limiting, connection limits, request/header/body/idle timeout slow-client behavior, WAF block paths for HTTP/1.1/WebSocket/WebSocket proxy/partial HTTP/2, WAF virtual-host override behavior, WAF false-positive corpus, response serializer, handler pipeline, SQLite config, CLI config, protocol capability, HTTP/2 wire, HTTP/3 wire, virtual host, and WAF tests. |
 | Deployment | Planned | No production deployment files. |
 | Database | Partial | SQLite is used for runtime configuration only; the SQLite engine is bundled static and config schema version `1` is recorded. |
 | I/O model | Partial | Linux `epoll` reactor with per-worker event loops and SO_REUSEPORT implemented; benchmarks still pending. |
@@ -163,12 +164,20 @@ Semasa pemeriksaan awal pada 2026-07-18:
 Most recent completed on 2026-07-20:
 
 ```bash
-git diff --check
+cmake --build build --target rimau-waf-tests rimau-virtual-host-tests rimau-config-database-tests rimau-server
+ctest --test-dir build --output-on-failure -R "rimau_(waf|virtual_host|config_database)"
+python3 -m py_compile tests/test_http1_network.py
+ctest --test-dir build --output-on-failure -R rimau_http1_network
+ctest --test-dir build --output-on-failure
 ```
 
 Result:
 
-- Documentation diff check passed.
+- WAF, virtual host, config database, and server targets built.
+- WAF, virtual host, and config database tests passed, 3/3.
+- Python syntax check passed.
+- HTTP/1.1 network integration test passed, 1/1.
+- Full CTest passed, 12/12.
 
 Phase 2 WAF dependency decision update:
 
@@ -1076,7 +1085,7 @@ Known limits from this update:
 
 - This is not full `libmodsecurity`.
 - This does not bundle the full OWASP Core Rule Set.
-- ModSecurity rule syntax parsing, full transaction phases, per-virtual-host WAF exceptions, structured persistent audit logs, and rule update tooling are not implemented. Needs verification.
+- ModSecurity rule syntax parsing, full transaction phases, rich per-path/per-parameter WAF exceptions, structured persistent audit logs, and rule update tooling are not implemented. ADR-0035 later adds basic per-host numeric rule exceptions. Needs verification.
 - WAF audit logging currently writes a concise stderr log line through the existing logger when enabled; it is not a ModSecurity audit log format.
 
 Validation on 2026-07-20 after ModSecurity-compatible WAF update:
@@ -1498,3 +1507,32 @@ Result:
 - WAF test target built.
 - `rimau_waf` passed, 1/1 test.
 - Full CTest passed, 12/12 tests.
+
+Phase 2 per-virtual-host WAF override update:
+
+- Added SQLite config key `virtual_host_waf_overrides`.
+- Added parser and host selection for exact and simple wildcard WAF override host patterns.
+- Added WAF settings overrides for `enabled`, `owasp_crs`, `blocking`, `threshold`, and numeric `rule_exceptions`.
+- Added WAF engine support for disabled built-in rule ids.
+- Wired per-host WAF settings into the shared WAF inspection path used by HTTP/1.1, WebSocket upgrade, WebSocket reverse proxy upgrade, and partial HTTP/2 dispatch.
+- Added unit coverage for config database loading/validation, virtual host override parsing/application, and WAF rule exceptions.
+- Added HTTP/1.1 network integration coverage showing scanner traffic is blocked by default but allowed for hosts with `enabled:false`, `rule_exceptions:913100`, or a higher threshold.
+- Marked the Phase 2 per-virtual-host WAF controls checklist item complete in `docs/plans/021-ordered-update-checklist.md`.
+
+Validation on 2026-07-20 after per-virtual-host WAF override update:
+
+```bash
+cmake --build build --target rimau-waf-tests rimau-virtual-host-tests rimau-config-database-tests rimau-server
+ctest --test-dir build --output-on-failure -R "rimau_(waf|virtual_host|config_database)"
+python3 -m py_compile tests/test_http1_network.py
+ctest --test-dir build --output-on-failure -R rimau_http1_network
+ctest --test-dir build --output-on-failure
+```
+
+Result:
+
+- WAF, virtual host, config database, and server targets built.
+- WAF, virtual host, and config database tests passed, 3/3.
+- Python syntax check passed.
+- HTTP/1.1 network integration test passed, 1/1.
+- Full CTest passed, 12/12.

@@ -171,6 +171,17 @@ int main()
     }
 
     {
+        auto request = make_request("/../../etc/passwd");
+        auto settings = enabled_settings();
+        settings.disabled_rule_ids.push_back(930100);
+        const auto result = rimau::http::inspect_request(request, settings);
+        assert(result.inspected);
+        assert(result.allowed);
+        assert(result.anomaly_score == 0);
+        assert(result.matches.empty());
+    }
+
+    {
         auto request = make_request("/search?q=%27%20or%201=1--");
         const auto result = rimau::http::inspect_request(request, enabled_settings());
         assert(!result.allowed);

@@ -926,6 +926,35 @@ def test_waf_entry_points(server_path: Path, runtime_root: Path) -> None:
         assert b"Forbidden by Rimau ModSecurity compatible WAF" in body, (headers, body)
 
 
+def scanner_request(host: str) -> bytes:
+    return (
+        f"GET / HTTP/1.1\r\nHost: {host}\r\nUser-Agent: sqlmap/1.8\r\nConnection: close\r\n\r\n"
+    ).encode("ascii")
+
+
+def test_virtual_host_waf_overrides(server_path: Path, runtime_root: Path) -> None:
+    updates = [
+        "worker_threads=1",
+        "rate_limit_enabled=false",
+        "modsecurity_enabled=true",
+        "modsecurity_owasp_crs_enabled=true",
+        "modsecurity_blocking_enabled=true",
+        "modsecurity_anomaly_threshold=5",
+        "virtual_host_waf_overrides=disabled.test=enabled:false;exceptions.test=rule_exceptions:913100;threshold.test=threshold:10",
+    ]
+    with RimauServer(server_path, runtime_root, extra_updates=updates) as server:
+        status, _, headers, body = http_request(server.port, scanner_request("localhost"))
+        assert status == 403, (status, headers, body)
+        assert headers.get("x-rimau-waf") == "blocked", headers
+        assert headers.get("x-rimau-waf-rule-id") == "913100", headers
+
+        for host in ("disabled.test", "exceptions.test", "threshold.test"):
+            status, _, headers, body = http_request(server.port, scanner_request(host))
+            assert status == 200, (host, status, headers, body)
+            assert headers.get("x-rimau-waf") != "blocked", (host, headers)
+            assert b"Rimau custom index" in body, (host, body)
+
+
 def main() -> int:
     if len(sys.argv) != 3:
         print("usage: test_http1_network.py /path/to/rimau-server /path/to/runtime-root", file=sys.stderr)
@@ -953,6 +982,7 @@ def main() -> int:
     test_timeout_and_slow_client_behavior(server_path, runtime_root)
     test_request_timeout(server_path, runtime_root)
     test_waf_entry_points(server_path, runtime_root)
+    test_virtual_host_waf_overrides(server_path, runtime_root)
 
     print("http1 network integration tests passed")
     return 0

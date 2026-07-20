@@ -18,6 +18,8 @@
 namespace rimau::core {
 namespace {
 
+inline constexpr int current_config_schema_version = 1;
+
 std::uint16_t parse_port(const std::string& value)
 {
     try {
@@ -478,6 +480,11 @@ public:
         return text ? reinterpret_cast<const char*>(text) : "";
     }
 
+    int column_int(int index) const
+    {
+        return sqlite3_column_int(stmt_, index);
+    }
+
 private:
     sqlite3* db_;
     sqlite3_stmt* stmt_ = nullptr;
@@ -500,6 +507,41 @@ void create_schema(const Database& database)
         "BEGIN "
         "UPDATE rimau_config SET updated_at = CURRENT_TIMESTAMP WHERE key = OLD.key;"
         "END;");
+
+    database.exec(
+        "CREATE TABLE IF NOT EXISTS rimau_schema_migrations ("
+        "version INTEGER PRIMARY KEY NOT NULL,"
+        "name TEXT NOT NULL,"
+        "applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP"
+        ");");
+
+    database.exec(
+        "INSERT OR IGNORE INTO rimau_schema_migrations(version, name) "
+        "VALUES (1, 'initial rimau_config schema');");
+}
+
+int read_schema_version(const Database& database)
+{
+    Statement statement(database.get(), "SELECT COALESCE(MAX(version), 0) FROM rimau_schema_migrations;");
+    const int rc = statement.step();
+    if (rc == SQLITE_ROW) {
+        return statement.column_int(0);
+    }
+    if (rc == SQLITE_DONE) {
+        return 0;
+    }
+
+    throw std::runtime_error("sqlite read schema version failed: " + std::string(sqlite3_errmsg(database.get())));
+}
+
+void validate_schema_version(const Database& database)
+{
+    const int version = read_schema_version(database);
+    if (version > current_config_schema_version) {
+        throw std::runtime_error(
+            "sqlite config database schema version " + std::to_string(version) + " is newer than supported version "
+            + std::to_string(current_config_schema_version));
+    }
 }
 
 void insert_default(const Database& database, const ConfigDefault& item)
@@ -806,10 +848,19 @@ void initialize_config_database(const std::filesystem::path& database_path)
 {
     const Database database(database_path);
     create_schema(database);
+    validate_schema_version(database);
 
     for (const auto& item : config_defaults()) {
         insert_default(database, item);
     }
+}
+
+int config_schema_version(const std::filesystem::path& database_path)
+{
+    initialize_config_database(database_path);
+
+    const Database database(database_path);
+    return read_schema_version(database);
 }
 
 ServerConfig load_config_from_database(const std::filesystem::path& database_path)

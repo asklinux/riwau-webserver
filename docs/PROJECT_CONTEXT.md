@@ -36,6 +36,7 @@ Implemented:
 - HTTP/1.1 keep-alive dengan SQLite-configured idle timeout dan max requests per connection
 - Connection object pool yang mengekalkan buffer capacity untuk mengurangkan malloc/free
 - SIGHUP live reload terhad untuk SQLite config yang tidak memerlukan listener/worker restart
+- SQLite schema metadata table `rimau_schema_migrations` dengan current config schema version `1` dan guard untuk menolak database versi masa depan
 - CTest untuk test asas
 - Bundled static SQLite 3.53.3 untuk runtime server configuration
 - Bundled static OpenSSL 4.0.1 untuk TLS/SSL, TLS 1.2/1.3, SNI validation, multi-certificate SNI selection, ALPN `http/1.1`, dan partial ALPN `h2` apabila HTTP/2 diaktifkan
@@ -148,6 +149,7 @@ Not present:
 - `rimau::core::Server`: Mencipta worker pool berasaskan CPU core, memasang signal handler, dan menjalankan Linux `epoll` reactor per worker.
 - `rimau::core::ServerConfig`: Konfigurasi host, port, document root, request limit, timeout, security limits, backlog, server name, protocol flags, TLS settings, SNI certificate map, IP lists, dan security header values yang dibaca daripada SQLite.
 - `rimau::core::load_config_from_database`: Bootstrap dan baca jadual SQLite `rimau_config`.
+- `rimau::core::config_schema_version`: Bootstrap metadata SQLite dan laporkan versi skema config semasa.
 - `rimau::core::set_config_value`: Tulis nilai config disokong ke SQLite.
 - `rimau::core::Server`: Mencipta dan reload TLS context termasuk SNI certificate contexts apabila `tls_enabled=true`.
 - `rimau::http::parse_request`: Parser asas HTTP/1.0 dan HTTP/1.1 untuk request line, headers, URL-decoded path, query params, dan buffered body.
@@ -419,7 +421,7 @@ Production deployment, service manager, packaging, container, TLS certificate ha
 - Dev certificate self-signed tidak sesuai untuk production.
 - HTTP/2 belum production-complete; `http2_enabled` mengaktifkan partial cleartext h2c request serving dan partial TLS ALPN `h2` serving apabila `tls_alpn_protocols` mengandungi `h2`. HTTP/3 belum implemented sebagai live request-serving protocol; `http3_enabled` masih status/config gate buat masa ini.
 - MIME mapping masih minimum.
-- SQLite config schema belum ada migration versioning eksplisit.
+- SQLite config schema kini ada metadata version table v1, tetapi belum ada framework multi-step migration, downgrade policy, backup policy, atau admin UI.
 - Tiada admin UI/API untuk ubah config; buat masa ini guna CLI `--set`.
 - Tiada benchmark.
 - Tiada fuzzing parser.

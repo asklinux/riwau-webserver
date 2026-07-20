@@ -19,6 +19,8 @@ Move Rimau Web Server runtime configuration from key-value config files into SQL
 - Added protocol gate keys `http1_enabled`, `http2_enabled`, and `http3_enabled`.
 - Added HTTP keep-alive keys `http_keep_alive_enabled`, `http_keep_alive_timeout_seconds`, and `http_keep_alive_max_requests`.
 - Added limited SIGHUP live reload for restart-free dynamic config values.
+- Added `rimau_schema_migrations` metadata table with current config schema version `1`.
+- Added test coverage for new DB bootstrap, legacy DB metadata bootstrap, and rejection of future schema versions.
 
 ## SQLite Table
 
@@ -29,7 +31,15 @@ CREATE TABLE rimau_config (
   description TEXT NOT NULL DEFAULT '',
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE rimau_schema_migrations (
+  version INTEGER PRIMARY KEY NOT NULL,
+  name TEXT NOT NULL,
+  applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
 ```
+
+Current config schema version is `1`.
 
 ## Supported Keys
 
@@ -76,7 +86,7 @@ make serve
 
 ## Not Implemented Yet
 
-- Schema migration/version table.
+- Multi-step migration framework, downgrade policy, and production backup/restore workflow.
 - SIGHUP reload for listener, worker, pool, and TLS changes; those currently require restart.
 - Admin/control API for config.
 - Production backup and permission policy.

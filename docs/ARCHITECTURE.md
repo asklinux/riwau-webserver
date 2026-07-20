@@ -147,6 +147,24 @@ CREATE TABLE rimau_config (
 );
 ```
 
+Schema migration metadata table:
+
+```sql
+CREATE TABLE rimau_schema_migrations (
+  version INTEGER PRIMARY KEY NOT NULL,
+  name TEXT NOT NULL,
+  applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+```
+
+Current config schema version:
+
+```text
+1
+```
+
+Version `1` is `initial rimau_config schema`. Existing SQLite databases that already have `rimau_config` but no migration metadata are bootstrapped with version `1` on the next config load. If `rimau_schema_migrations` contains a version newer than the binary supports, Rimau rejects the database instead of trying to read it with an older config model.
+
 TLS-related config values store file paths only. Certificate and private key files themselves are not stored inside SQLite.
 
 Supported keys:
@@ -219,11 +237,11 @@ Supported keys:
 - `modsecurity_max_inspection_bytes`
 - `modsecurity_audit_log_enabled`
 
-The server bootstraps this table and default rows when the SQLite database is missing. Runtime configuration is read from SQLite, not a key-value config file.
+The server bootstraps these tables and default rows when the SQLite database is missing. Runtime configuration is read from SQLite, not a key-value config file.
 
-There are no ORM models. There is no explicit schema migration versioning yet.
+There are no ORM models. The migration system is currently a minimal version-history table, not a full multi-step migration framework.
 
-Future admin API, cache metadata, metrics retention, or control plane storage may require additional tables. Needs verification.
+Future admin API, cache metadata, metrics retention, downgrade policy, backup policy, or control plane storage may require additional tables and migration steps. Needs verification.
 
 ## Bundled Build Architecture
 

@@ -59,6 +59,7 @@ Jika fail konfigurasi memerlukan nilai sensitif, gunakan placeholder seperti `CH
 - Gunakan C++20 dan CMake selagi keputusan teknikal ini belum berubah dalam `docs/DECISIONS.md`.
 - Kekalkan struktur modul dalam `include/rimau/`, `src/`, `tests/`, `public/`, `scripts/`, dan `docs/`.
 - Semua runtime configuration server wajib dibaca daripada SQLite melalui `--database`; jangan hidupkan semula fail config key-value.
+- Perubahan skema SQLite config wajib direkod dalam `rimau_schema_migrations`, ditest dengan DB lama/baru, dan didokumenkan dalam `docs/ARCHITECTURE.md` serta `docs/DECISIONS.md`.
 - SQLite engine wajib guna bundled static SQLite yang dibina oleh target `rimau_bundled_sqlite`; jangan tambah semula `find_package(SQLite3)` sistem.
 - TLS/SSL wajib guna bundled OpenSSL yang dibina oleh CMake target `rimau_bundled_openssl`; jangan tambah semula `find_package(OpenSSL)` sistem.
 - Gzip wajib guna bundled static zlib yang dibina oleh target `rimau_bundled_zlib`; jangan tambah semula `find_package(ZLIB)` sistem.

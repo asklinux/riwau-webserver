@@ -14,6 +14,8 @@ Implemented:
 - `rimau-server` CLI.
 - Project name exposed as `Rimau Web Server` in CLI/version and HTTP `server` header.
 - SQLite-backed config loader.
+- SQLite config schema metadata table `rimau_schema_migrations` with current version `1`.
+- Future-version guard for SQLite config databases that are newer than the running binary.
 - SQLite config update command `--set key=value`.
 - Bundled static SQLite 3.53.3 build through CMake.
 - Bundled static OpenSSL 4.0.1 build through CMake.
@@ -98,7 +100,7 @@ Partial:
 - MIME detection by common file extension.
 - HTTP/1.1 support is partial; streaming request bodies, multipart ranges, Brotli, full WebSocket application routing, and broad stress validation are not implemented.
 - Proxygen-inspired pipeline is partial; filter chain, async body streaming, and full protocol session adapters are not implemented.
-- SQLite config is partial; no migration version table, admin UI, or config backup policy yet. SIGHUP live reload is implemented only for restart-free dynamic values.
+- SQLite config is partial; schema version table exists, but multi-step migration framework, admin UI, and config backup policy are not implemented. SIGHUP live reload is implemented only for restart-free dynamic values.
 - TLS is partial; production certificate lifecycle and OCSP are not implemented. HTTP/2 ALPN `h2` request serving exists only as a partial basic path, not production-complete HTTP/2.
 - Virtual hosts are partial; exact host, simple wildcard, static roots, proxy rules, and script declarations exist, but rewrite rules and richer routing are not implemented.
 - Reverse proxy is partial; HTTP/HTTPS upstream, optional default-trust-path certificate verification, buffered normal HTTP response, WebSocket tunnel data path through worker `epoll`, basic hop-by-hop header stripping, basic round-robin, retry/failover, and passive circuit breaker exist. Per-upstream HTTPS verification policy, normal HTTP proxy streaming, advanced load balancing, active health checks, and upstream connection pooling are not implemented.
@@ -140,11 +142,11 @@ Semasa pemeriksaan awal pada 2026-07-18:
 | Reverse proxy | Partial | HTTP/HTTPS upstream, optional default-trust-path certificate verification, buffered normal HTTP response, WebSocket tunnel data path in worker `epoll`, basic round-robin, retry/failover, and passive circuit breaker; no per-upstream CA/pinning policy, active health checks, normal HTTP proxy streaming, or upstream connection pooling yet. |
 | Server-side runtimes | Planned | `script:runtime:path` config returns `501`; PHP/Python/Perl are not bundled or executed yet. |
 | Request pipeline | Partial | Handler/factory/transaction/response sink implemented for static, vhost, reverse proxy, and script-placeholder HTTP/1.1. |
-| Config | Partial | SQLite table `rimau_config`, including protocol, TLS, keep-alive, timeout, rate-limit, IP-list, security-header, virtual-host/proxy, and limited SIGHUP reload behavior. |
+| Config | Partial | SQLite table `rimau_config`, schema metadata table `rimau_schema_migrations`, protocol, TLS, keep-alive, timeout, rate-limit, IP-list, security-header, virtual-host/proxy keys, and limited SIGHUP reload behavior. |
 | Security | Partial | Baseline HTTP framing hardening, timeout, rate limit, connection limit, built-in ModSecurity-compatible WAF subset, configurable security header values, and IPv4/IPv6 IP allow/block list are implemented; fuzzing, full ModSecurity/CRS integration, and production hardening remain pending. |
 | Tests | Partial | Parser, response serializer, handler pipeline, SQLite config, protocol capability, HTTP/2 wire, HTTP/3 wire, virtual host, and WAF tests. |
 | Deployment | Planned | No production deployment files. |
-| Database | Partial | SQLite is used for runtime configuration only; the SQLite engine is bundled static. |
+| Database | Partial | SQLite is used for runtime configuration only; the SQLite engine is bundled static and config schema version `1` is recorded. |
 | I/O model | Partial | Linux `epoll` reactor with per-worker event loops and SO_REUSEPORT implemented; benchmarks still pending. |
 
 ## Last Validation
@@ -1102,3 +1104,33 @@ CI workflow update:
 - Retry workflow run `29711700813` also failed with `startup_failure` before jobs were created and without logs. Local `actionlint` validation passed, so the failure still needs GitHub Actions runner/startup investigation. Needs verification.
 - Third workflow run `29711874922` used `ubuntu-22.04` and still failed with `startup_failure` before jobs were created and without logs.
 - Repository Actions permissions API reports Actions enabled and all actions/workflows allowed; the repo has no self-hosted runners configured. Needs verification whether GitHub-hosted runner startup is unavailable or another repository setting is blocking job creation.
+
+SQLite schema migration metadata update:
+
+- Added `rimau_schema_migrations` with current config schema version `1`.
+- Added `rimau::core::config_schema_version`.
+- Fresh SQLite config databases now bootstrap both `rimau_config` and `rimau_schema_migrations`.
+- Existing SQLite config databases that already have `rimau_config` but no migration metadata are marked as version `1` during bootstrap.
+- SQLite config databases with a recorded schema version newer than the binary supports are rejected.
+- Updated `tests/test_config_database.cpp` to cover fresh DB bootstrap, legacy metadata bootstrap, and future-version rejection.
+- Marked the SQLite schema migration/version checklist item complete in `docs/plans/021-ordered-update-checklist.md`.
+
+Validation on 2026-07-20 after SQLite schema migration metadata update:
+
+```bash
+cmake --build build
+ctest --test-dir build --output-on-failure
+ctest --test-dir build --output-on-failure -R rimau_config_database
+./build/rimau-server --check-config
+./build/rimau-server --protocols
+./build/rimau-server --database data/rimau.sqlite3 --check-config
+./build/rimau-server --database data/rimau.sqlite3 --protocols
+```
+
+Result:
+
+- Build passed; static glibc DNS/NSS linker warnings for `getaddrinfo`/OpenSSL `gethostbyname` remain.
+- CTest passed, 9/9 tests.
+- `rimau_config_database` passed.
+- Default and `data/rimau.sqlite3` config checks passed.
+- Default and `data/rimau.sqlite3` protocol status checks passed.

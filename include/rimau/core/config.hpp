@@ -82,6 +82,7 @@ struct ServerConfig {
 };
 
 void initialize_config_database(const std::filesystem::path& database_path);
+int config_schema_version(const std::filesystem::path& database_path);
 ServerConfig load_config_from_database(const std::filesystem::path& database_path);
 void set_config_value(const std::filesystem::path& database_path, const std::string& key, const std::string& value);
 std::vector<std::string> supported_config_keys();

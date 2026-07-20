@@ -142,7 +142,7 @@ The project owner requested SQLite as the source of configuration. A database-ba
 
 Consequence:
 
-SQLite is now the required runtime configuration store. Schema migration/versioning, config reload, backup policy, and production database ownership still need verification. At this decision point SQLite was linked as a normal CMake dependency; ADR-0021 later changes the SQLite engine to a bundled static build so system `libsqlite3` is no longer a runtime dependency.
+SQLite is now the required runtime configuration store. Multi-step migrations, config reload, backup policy, and production database ownership still need verification. At this decision point SQLite was linked as a normal CMake dependency; ADR-0021 later changes the SQLite engine to a bundled static build so system `libsqlite3` is no longer a runtime dependency.
 
 Note:
 
@@ -150,6 +150,7 @@ ADR-0015 later adds TLS/security/timeout/rate-limit/IP-list keys to the same SQL
 ADR-0016 later adds multi-certificate SNI, IPv4/IPv6 IP list validation, and security header value keys.
 ADR-0017 later adds virtual host and reverse proxy keys.
 ADR-0021 later bundles SQLite as a static dependency.
+ADR-0027 later adds SQLite config schema metadata and future-version rejection.
 
 ## ADR-0009: Bundle OpenSSL For Rimau TLS
 
@@ -697,3 +698,29 @@ The project owner requested ModSecurity and OWASP rules to be built into the sys
 Consequence:
 
 The current WAF is useful but partial. It does not parse ModSecurity rule syntax, does not implement the full ModSecurity transaction phase model, does not bundle the full OWASP Core Rule Set, does not provide per-virtual-host rule tuning, and does not persist structured audit logs. Full `libmodsecurity` and full OWASP CRS source bundling remain planned and need version/license/build validation before being claimed. Needs verification.
+
+## ADR-0027: Version The SQLite Config Schema
+
+- Date: 2026-07-20
+- Status: Accepted
+
+Decision:
+
+Add explicit SQLite config schema metadata through `rimau_schema_migrations` and define current config schema version `1`.
+
+Implementation:
+
+- Add table `rimau_schema_migrations(version INTEGER PRIMARY KEY NOT NULL, name TEXT NOT NULL, applied_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP)`.
+- Bootstrap version `1` with name `initial rimau_config schema`.
+- Add `rimau::core::config_schema_version` for tests and diagnostics.
+- Existing databases that have `rimau_config` but no metadata are bootstrapped to version `1`.
+- Reject SQLite config databases whose recorded schema version is newer than the binary supports.
+- Add config database test coverage for fresh DB bootstrap, legacy metadata bootstrap, and future-version rejection.
+
+Reason:
+
+Rimau now stores all runtime configuration in SQLite. Without schema metadata, future config-table changes could silently run against an unknown database layout. A minimal migration history table gives the project a durable upgrade marker without adding an ORM or a larger admin subsystem.
+
+Consequence:
+
+The current migration system records version history and prevents accidental downgrade reads, but it is not yet a full multi-step migration framework. Future schema changes still need explicit migration functions, downgrade policy, backup/restore guidance, and production ownership rules. Needs verification.

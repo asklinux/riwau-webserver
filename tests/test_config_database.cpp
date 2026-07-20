@@ -6,13 +6,82 @@
 #include <stdexcept>
 #include <string>
 
+#include <sqlite3.h>
+
 namespace {
 
-std::filesystem::path make_database_path()
+std::filesystem::path make_database_path(const std::string& prefix = "rimau-config-test-")
 {
+    static int sequence = 0;
     const auto stamp = std::chrono::steady_clock::now().time_since_epoch().count();
-    return std::filesystem::temp_directory_path() / ("rimau-config-test-" + std::to_string(stamp) + ".sqlite3");
+    return std::filesystem::temp_directory_path() / (prefix + std::to_string(stamp) + "-" + std::to_string(++sequence) + ".sqlite3");
 }
+
+class TestDatabase {
+public:
+    explicit TestDatabase(const std::filesystem::path& database_path)
+    {
+        sqlite3* opened = nullptr;
+        const int rc = sqlite3_open_v2(
+            database_path.string().c_str(),
+            &opened,
+            SQLITE_OPEN_READWRITE | SQLITE_OPEN_CREATE,
+            nullptr);
+
+        db_ = opened;
+        if (rc != SQLITE_OK) {
+            const std::string message = db_ ? sqlite3_errmsg(db_) : "unknown sqlite error";
+            if (db_) {
+                sqlite3_close(db_);
+                db_ = nullptr;
+            }
+            throw std::runtime_error("test cannot open sqlite database: " + message);
+        }
+    }
+
+    TestDatabase(const TestDatabase&) = delete;
+    TestDatabase& operator=(const TestDatabase&) = delete;
+
+    ~TestDatabase()
+    {
+        if (db_) {
+            sqlite3_close(db_);
+        }
+    }
+
+    void exec(const char* sql) const
+    {
+        char* raw_error = nullptr;
+        const int rc = sqlite3_exec(db_, sql, nullptr, nullptr, &raw_error);
+        if (rc != SQLITE_OK) {
+            const std::string message = raw_error ? raw_error : sqlite3_errmsg(db_);
+            sqlite3_free(raw_error);
+            throw std::runtime_error("test sqlite exec failed: " + message);
+        }
+    }
+
+    int scalar_int(const char* sql) const
+    {
+        sqlite3_stmt* statement = nullptr;
+        int rc = sqlite3_prepare_v2(db_, sql, -1, &statement, nullptr);
+        if (rc != SQLITE_OK) {
+            throw std::runtime_error("test sqlite prepare failed: " + std::string(sqlite3_errmsg(db_)));
+        }
+
+        rc = sqlite3_step(statement);
+        if (rc != SQLITE_ROW) {
+            sqlite3_finalize(statement);
+            throw std::runtime_error("test sqlite scalar query returned no row");
+        }
+
+        const int value = sqlite3_column_int(statement, 0);
+        sqlite3_finalize(statement);
+        return value;
+    }
+
+private:
+    sqlite3* db_ = nullptr;
+};
 
 } // namespace
 
@@ -86,6 +155,10 @@ int main()
         assert(config.modsecurity_anomaly_threshold == 5);
         assert(config.modsecurity_max_inspection_bytes == 131072);
         assert(config.modsecurity_audit_log_enabled);
+        assert(rimau::core::config_schema_version(database_path) == 1);
+        const TestDatabase database(database_path);
+        assert(database.scalar_int("SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'rimau_schema_migrations';") == 1);
+        assert(database.scalar_int("SELECT COUNT(*) FROM rimau_schema_migrations WHERE version = 1 AND name = 'initial rimau_config schema';") == 1);
     }
 
     rimau::core::set_config_value(database_path, "host", "127.0.0.1");
@@ -225,6 +298,7 @@ int main()
         assert(config.modsecurity_anomaly_threshold == 7);
         assert(config.modsecurity_max_inspection_bytes == 65536);
         assert(!config.modsecurity_audit_log_enabled);
+        assert(rimau::core::config_schema_version(database_path) == 1);
     }
 
     bool unknown_key_failed = false;
@@ -445,6 +519,46 @@ int main()
     }
     assert(invalid_modsecurity_threshold_failed);
 
+    const auto legacy_database_path = make_database_path("rimau-config-legacy-test-");
+    {
+        TestDatabase database(legacy_database_path);
+        database.exec(
+            "CREATE TABLE rimau_config ("
+            "key TEXT PRIMARY KEY NOT NULL,"
+            "value TEXT NOT NULL,"
+            "description TEXT NOT NULL DEFAULT '',"
+            "updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP"
+            ");"
+            "INSERT INTO rimau_config(key, value, description) "
+            "VALUES ('host', '127.0.0.2', 'legacy host');");
+    }
+    {
+        const auto config = rimau::core::load_config_from_database(legacy_database_path);
+        assert(config.host == "127.0.0.2");
+        assert(config.port == 8080);
+        assert(rimau::core::config_schema_version(legacy_database_path) == 1);
+
+        const TestDatabase database(legacy_database_path);
+        assert(database.scalar_int("SELECT COUNT(*) FROM rimau_schema_migrations WHERE version = 1;") == 1);
+    }
+
+    const auto future_database_path = make_database_path("rimau-config-future-test-");
+    (void)rimau::core::load_config_from_database(future_database_path);
+    {
+        TestDatabase database(future_database_path);
+        database.exec("INSERT OR REPLACE INTO rimau_schema_migrations(version, name) VALUES (999, 'future test schema');");
+    }
+
+    bool future_schema_failed = false;
+    try {
+        (void)rimau::core::load_config_from_database(future_database_path);
+    } catch (const std::runtime_error& error) {
+        future_schema_failed = std::string(error.what()).find("newer than supported version") != std::string::npos;
+    }
+    assert(future_schema_failed);
+
     std::filesystem::remove(database_path);
+    std::filesystem::remove(legacy_database_path);
+    std::filesystem::remove(future_database_path);
     return 0;
 }

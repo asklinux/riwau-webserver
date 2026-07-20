@@ -26,7 +26,7 @@ Untuk setiap item:
 - [ ] Verify first GitHub Actions CI run.
   - Done criteria: GitHub Actions build CMake dan run CTest untuk PR/push selepas workflow dipush.
   - Status: tunggu push/PR dan GitHub Actions run pertama lulus sebelum tanda `[x]`.
-- [ ] Tambah SQLite schema migration/version table.
+- [x] Tambah SQLite schema migration/version table.
   - Done criteria: config database mempunyai versioning dan test migration.
 - [ ] Tambah CLI integration tests untuk `--database`, `--set`, `--check-config`, dan `--protocols`.
   - Done criteria: test gagal jika config SQLite tidak bootstrap/update dengan betul.

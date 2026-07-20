@@ -23,9 +23,11 @@ struct Http1FrameOptions {
 struct Http1FrameResult {
     Http1FrameState state = Http1FrameState::incomplete;
     std::optional<Request> request;
+    std::optional<std::size_t> content_length;
     std::string raw_request;
     std::size_t consumed = 0;
     bool waiting_for_body = false;
+    bool chunked = false;
     bool discard_buffer = false;
     int error_status = 400;
     std::string error_message = "Bad Request\n";

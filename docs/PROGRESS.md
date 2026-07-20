@@ -35,6 +35,7 @@ Implemented:
 - HTTP/1.1 method support for GET, POST, PUT, PATCH, DELETE, OPTIONS, and HEAD.
 - Content-Length request body parsing.
 - Chunked request body decoding.
+- HTTP/1.1 file-backed request body spooling for large Content-Length and chunked bodies before handler dispatch.
 - URL decoding and query parameter parsing.
 - JSON request detection and JSON scaffold responses for methods with bodies.
 - Single-range static file responses.
@@ -102,8 +103,8 @@ Partial:
 - Logging hanya ke stderr.
 - Path traversal protection asas.
 - MIME detection by common file extension.
-- HTTP/1.1 support is partial; streaming request bodies, multipart ranges, Brotli, full WebSocket application routing, and broad stress validation are not implemented.
-- Proxygen-inspired pipeline is partial; filter chain, async body streaming, and full protocol session adapters are not implemented.
+- HTTP/1.1 support is partial; file-backed large-body spooling exists, but handler-level streaming request body API, response chunking, multipart ranges, Brotli, full WebSocket application routing, and broad stress validation are not implemented.
+- Proxygen-inspired pipeline is partial; filter chain, async handler body streaming, and full protocol session adapters are not implemented.
 - SQLite config is partial; schema version table exists, but multi-step migration framework, admin UI, and config backup policy are not implemented. SIGHUP live reload is implemented only for restart-free dynamic values.
 - TLS is partial; production certificate lifecycle and OCSP are not implemented. HTTP/2 ALPN `h2` request serving exists only as a partial basic path, not production-complete HTTP/2.
 - Virtual hosts are partial; exact host, simple wildcard, static roots, proxy rules, and script declarations exist, but rewrite rules and richer routing are not implemented.
@@ -137,7 +138,7 @@ Semasa pemeriksaan awal pada 2026-07-18:
 | --- | --- | --- |
 | Build system | Implemented | CMake with bundled static OpenSSL, SQLite, zlib, Bison, Linux UAPI headers, and glibc targets; `rimau-server` is fully static in current Linux x86_64 validation. |
 | CLI | Partial | `--database`, `--set`, `--check-config`, `--protocols`, `--version`, `--help`. |
-| HTTP/1.1 | Partial | GET/HEAD static, POST/PUT/PATCH/DELETE JSON scaffold, OPTIONS, Content-Length, chunked decode, keep-alive, basic pipelining, range, gzip, WebSocket echo, WebSocket reverse proxy tunnel, and extracted testable request framing. |
+| HTTP/1.1 | Partial | GET/HEAD static, POST/PUT/PATCH/DELETE JSON scaffold, OPTIONS, Content-Length, chunked decode, file-backed large-body spooling, keep-alive, basic pipelining, range, gzip, WebSocket echo, WebSocket reverse proxy tunnel, and extracted testable request framing. |
 | HTTP/2 | Partial | Frame codec, SETTINGS/PING basics, HPACK baseline, cleartext h2c and TLS ALPN `h2` HEADERS/DATA request serving through the shared handler pipeline exist; no production flow control, CONTINUATION assembly, HPACK Huffman, or dynamic-table persistence yet. |
 | HTTP/3 | Partial | QUIC varint, frame codec, and SETTINGS codec exist; no UDP/QUIC/QPACK/live serving yet. |
 | TLS | Partial | HTTP/1.1 HTTPS and partial HTTP/2 ALPN `h2` via bundled static OpenSSL 4.0.1 with TLS 1.2/1.3, SNI validation, multi-certificate SNI selection, ALPN `http/1.1`/`h2`, safe cipher config, and SIGHUP context reload for new connections. |
@@ -1216,3 +1217,39 @@ Result:
 - Build passed.
 - `rimau_http1_network` passed.
 - CTest passed, 12/12 tests.
+
+HTTP/1.1 request body spooling update:
+
+- Added `RequestBodyFile` and request helper APIs: `body_size()`, `body_spooled_to_file()`, and `body_text(max_bytes)`.
+- Added a per-connection HTTP/1.1 body accumulation state for headers-complete/body-incomplete requests.
+- Content-Length and chunked HTTP/1.1 request bodies are accumulated in memory up to 16 KiB; larger bodies are written to a `mkstemp`-created temporary file and attached to the request before `Transaction` dispatch.
+- `RequestBodyFile` removes its spool file through RAII cleanup when the request object is released.
+- Body timeout enforcement now still applies after buffered bytes have been consumed into the accumulator/spool file.
+- Static scaffold JSON responses now report `body_spooled` and `body_truncated` for large body tests.
+- WAF request-body inspection reads a bounded body prefix through `Request::body_text(limit)`.
+- Reverse proxy normal HTTP request forwarding can read a spooled body through `Request::body_text()`, but it still buffers that body into memory before sending upstream.
+
+Known limits from this update:
+
+- This is not a full handler-level streaming request body API.
+- Handler dispatch still happens only after the request body is complete.
+- Normal HTTP reverse proxy request/response streaming and backpressure remain pending.
+- Chunked trailers are consumed to find the message boundary but are not exposed to handlers.
+
+Validation on 2026-07-20 after HTTP/1.1 request body spooling update:
+
+```bash
+cmake --build build
+ctest --test-dir build --output-on-failure -R 'rimau_http1_network|rimau_http1_session|rimau_http_parser|rimau_waf'
+ctest --test-dir build --output-on-failure
+./build/rimau-server --check-config
+./build/rimau-server --protocols
+```
+
+Result:
+
+- Build passed; static glibc DNS/NSS linker warnings for `getaddrinfo`/OpenSSL `gethostbyname` remain.
+- Targeted HTTP/1/WAF tests passed, 4/4 tests.
+- Full CTest passed, 12/12 tests.
+- Config check passed.
+- Protocol status command passed and reports HTTP/1.1 file-backed large-body spooling.

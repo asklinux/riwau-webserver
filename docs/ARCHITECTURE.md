@@ -28,6 +28,7 @@ main()
   -> if cleartext HTTP/2 preface or TLS ALPN h2 preface and http2_enabled=true: parse SETTINGS, write SETTINGS + SETTINGS ACK, then process HTTP/2 HEADERS/DATA frames
   -> for complete HTTP/2 streams: decode HPACK baseline headers, build Request, dispatch through Transaction, serialize response as HTTP/2 HEADERS/DATA frames
   -> detect complete HTTP/1.1 message through rimau::http::next_http1_request_frame headers, Content-Length, or chunked transfer decoding
+  -> for HTTP/1.1 headers-complete/body-incomplete requests: stream incoming Content-Length or chunked body bytes into RequestBodyAccumulator with 16 KiB memory threshold and mkstemp-backed temporary-file spooling
   -> reject invalid HTTP framing and request-smuggling patterns
   -> parse_request()
   -> if WebSocket Upgrade matches proxy vhost: connect upstream, validate upstream 101, then tunnel client/upstream via same worker epoll reactor
@@ -83,6 +84,7 @@ Responsibility:
 
 - Request representation
 - HTTP/1.1 request header parsing and buffered message framing
+- HTTP/1.1 file-backed request body accumulation for large Content-Length or chunked uploads before handler dispatch
 - Response serialization
 - Static file response
 - Basic MIME detection
@@ -524,7 +526,9 @@ Current HTTP/1.1 connection flow:
 Linux epoll reactor worker
   -> ClientConnection state machine
   -> optional non-blocking TLS handshake/read/write
-  -> parse raw HTTP/1.1 bytes into Request
+  -> frame HTTP/1.1 headers and body boundary
+  -> if body is incomplete, accumulate body chunks into memory up to 16 KiB then mkstemp-backed temporary file
+  -> parse raw HTTP/1.1 bytes into Request, or attach spooled RequestBodyFile for large bodies
   -> built-in WAF inspection when enabled
   -> create Transaction
   -> VirtualHostHandlerFactory selects static, reverse proxy, script-placeholder, or fallback static handler
@@ -555,6 +559,7 @@ Current:
 - POST, PUT, PATCH, DELETE, and OPTIONS scaffold behavior.
 - Content-Length request body parsing.
 - Chunked transfer decoding for request bodies.
+- File-backed request body accumulation for large Content-Length or chunked bodies; `Request::body_size()` reports total body size, `Request::body_spooled_to_file()` reports whether a temporary spool file is used, and `Request::body_text(max_bytes)` reads bounded text for WAF/scaffold handlers.
 - URL decoding and query parameter parsing.
 - JSON request detection and JSON response generation for method scaffold responses.
 - Single-range static file responses with `206 Partial Content` and `Content-Range`.
@@ -602,7 +607,7 @@ Current:
 
 Missing:
 
-- Streaming request body API.
+- Handler-level streaming request body API and full backpressure contract. Current code accumulates large HTTP/1.1 bodies into temporary files before dispatch, but handlers still receive the request only after the body is complete.
 - Multipart byte ranges.
 - Brotli compression.
 - Full WebSocket fragmentation/extensions/subprotocol support.
@@ -724,6 +729,7 @@ Implemented:
 - IPv4/IPv6 exact/CIDR allowlist and blocklist.
 - Basic request-smuggling protection.
 - Header injection and response splitting mitigation.
+- Request body spool files are created with `mkstemp` and removed by `RequestBodyFile` RAII cleanup when the request object is released.
 - SQLite-configurable default security headers and configurable `Server` header.
 - WebSocket frame size limit.
 - Built-in ModSecurity-compatible WAF can block requests by anomaly threshold before HTTP handler dispatch. Current built-in rules cover scanner user agents, encoded CRLF/request splitting, path traversal, XSS, SQLi, RCE, PHP wrapper injection, and Java/JNDI exploit patterns.

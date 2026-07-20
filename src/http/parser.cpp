@@ -3,6 +3,8 @@
 #include <algorithm>
 #include <cctype>
 #include <cstdlib>
+#include <filesystem>
+#include <fstream>
 #include <sstream>
 #include <utility>
 
@@ -99,6 +101,17 @@ void parse_target(Request& request)
 
 } // namespace
 
+RequestBodyFile::RequestBodyFile(std::filesystem::path path_value)
+    : path(std::move(path_value))
+{
+}
+
+RequestBodyFile::~RequestBodyFile()
+{
+    std::error_code ignored;
+    std::filesystem::remove(path, ignored);
+}
+
 std::optional<std::string> Request::header(std::string_view name) const
 {
     std::string key(name);
@@ -135,6 +148,38 @@ bool Request::content_type_contains(std::string_view token) const
 bool Request::is_json() const
 {
     return content_type_contains("application/json") || content_type_contains("+json");
+}
+
+std::size_t Request::body_size() const noexcept
+{
+    return body_size_bytes == 0 && !body_spooled_to_file() ? body.size() : body_size_bytes;
+}
+
+bool Request::body_spooled_to_file() const noexcept
+{
+    return static_cast<bool>(body_file);
+}
+
+std::string Request::body_text(std::size_t max_bytes) const
+{
+    if (!body_file) {
+        if (max_bytes > 0 && body.size() > max_bytes) {
+            return body.substr(0, max_bytes);
+        }
+        return body;
+    }
+
+    std::ifstream input(body_file->path, std::ios::binary);
+    if (!input) {
+        return {};
+    }
+
+    const auto bytes_to_read = max_bytes == 0 ? body_size() : std::min(max_bytes, body_size());
+    std::string output;
+    output.resize(bytes_to_read);
+    input.read(output.data(), static_cast<std::streamsize>(output.size()));
+    output.resize(static_cast<std::size_t>(input.gcount()));
+    return output;
 }
 
 ParseResult parse_request(std::string_view raw_request)
@@ -190,6 +235,7 @@ ParseResult parse_request(std::string_view raw_request)
     std::ostringstream body;
     body << input.rdbuf();
     request.body = body.str();
+    request.body_size_bytes = request.body.size();
     parse_target(request);
 
     return ParseResult { std::move(request), ParseError::none, "" };

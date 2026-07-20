@@ -49,10 +49,13 @@ Response method_json_response(const Request& request)
            << "\"target\":\"" << json_escape(request.target) << "\","
            << "\"path\":\"" << json_escape(request.path) << "\","
            << "\"query\":" << query_params_json(request) << ","
-           << "\"body_size\":" << request.body.size() << ","
+           << "\"body_size\":" << request.body_size() << ","
            << "\"json_request\":" << (request.is_json() ? "true" : "false") << ",";
 
-    output << "\"body\":\"" << json_escape(request.body) << "\"";
+    const auto body = request.body_text(64 * 1024);
+    output << "\"body\":\"" << json_escape(body) << "\","
+           << "\"body_truncated\":" << (request.body_size() > body.size() ? "true" : "false") << ","
+           << "\"body_spooled\":" << (request.body_spooled_to_file() ? "true" : "false");
     output << "}\n";
 
     auto response = json_response(200, output.str());

@@ -468,9 +468,10 @@ std::string build_upstream_request(const Request& request, const ReverseProxyTar
         output << normalized_name << ": " << value << "\r\n";
     }
 
-    output << "content-length: " << request.body.size() << "\r\n";
+    const auto body = request.body_text();
+    output << "content-length: " << body.size() << "\r\n";
     output << "\r\n";
-    output << request.body;
+    output << body;
     return output.str();
 }
 

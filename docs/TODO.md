@@ -15,7 +15,7 @@
 
 - Add transaction IDs that are unique per connection/session.
 - Add integration tests for virtual host routing, fallback host behavior, reverse proxy success/failure, WebSocket proxy HTTP/HTTPS upstream behavior, and script-placeholder 501 behavior.
-- Add streaming request body API with backpressure for large uploads.
+- Complete handler-level streaming request body API with backpressure for large uploads; current HTTP/1.1 code only provides file-backed body spooling before handler dispatch.
 - Expose chunked trailers to handlers or explicitly discard them through a documented policy.
 - Add response chunking.
 - Add multipart range responses and `If-Range` handling for static files.

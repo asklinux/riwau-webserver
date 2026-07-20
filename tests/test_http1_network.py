@@ -245,6 +245,7 @@ class RimauServer:
             f"host=127.0.0.1",
             f"port={self.port}",
             f"document_root={self.document_root}",
+            "max_request_bytes=262144",
             "http_keep_alive_timeout_seconds=1",
             "http_keep_alive_max_requests=2",
             "idle_timeout_seconds=1",
@@ -332,6 +333,25 @@ def test_chunked_body(port: int) -> None:
     assert b'"body":"hello world"' in body, body
 
 
+def test_large_file_backed_body(port: int) -> None:
+    payload = b"a" * 70000
+    request = (
+        b"POST /large-body HTTP/1.1\r\n"
+        b"Host: localhost\r\n"
+        b"Content-Type: application/octet-stream\r\n"
+        b"Content-Length: " + str(len(payload)).encode("ascii") + b"\r\n"
+        b"Connection: close\r\n"
+        b"\r\n"
+        + payload
+    )
+    status, _, headers, body = http_request(port, request)
+    assert status == 200, (status, body[:200])
+    assert headers.get("content-type", "").startswith("application/json"), headers
+    assert b'"body_size":70000' in body, body[:200]
+    assert b'"body_spooled":true' in body, body[-200:]
+    assert b'"body_truncated":true' in body, body[-200:]
+
+
 def test_range_and_gzip(port: int) -> None:
     status, _, headers, body = http_request(
         port,
@@ -388,6 +408,7 @@ def main() -> int:
         test_keep_alive_pipelining_and_max_requests(server.port)
         test_idle_timeout(server.port)
         test_chunked_body(server.port)
+        test_large_file_backed_body(server.port)
         test_range_and_gzip(server.port)
         test_websocket_echo(server.port)
         test_websocket_proxy(server.port, upstream)

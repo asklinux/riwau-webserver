@@ -75,7 +75,7 @@ std::vector<InspectionTarget> collect_targets(const Request& request, std::size_
     targets.push_back({ "REQUEST_TARGET", inspection_value(request.target, limit) });
     targets.push_back({ "REQUEST_PATH", inspection_value(request.path, limit) });
     targets.push_back({ "QUERY_STRING", inspection_value(request.query_string, limit) });
-    targets.push_back({ "REQUEST_BODY", inspection_value(request.body, limit) });
+    targets.push_back({ "REQUEST_BODY", inspection_value(request.body_text(limit), limit) });
 
     for (const auto& [name, values] : request.query_params) {
         for (const auto& value : values) {

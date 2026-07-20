@@ -22,6 +22,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cerrno>
+#include <cstdlib>
 #include <cstring>
 #include <cctype>
 #include <filesystem>
@@ -59,6 +60,7 @@ volatile std::sig_atomic_t g_shutdown_signal_requested = 0;
 volatile std::sig_atomic_t g_reload_signal_requested = 0;
 volatile std::sig_atomic_t g_last_signal = 0;
 std::atomic<std::size_t> g_next_websocket_proxy_upstream { 0 };
+std::atomic<std::size_t> g_next_request_body_spool { 0 };
 
 void handle_runtime_signal(int signal_number)
 {
@@ -385,6 +387,34 @@ std::optional<std::size_t> parse_decimal_size(std::string_view value)
         }
         parsed = parsed * 10 + digit;
     }
+    return parsed;
+}
+
+std::optional<std::size_t> parse_hex_size(std::string_view value)
+{
+    if (value.empty()) {
+        return std::nullopt;
+    }
+
+    std::size_t parsed = 0;
+    for (const char ch : value) {
+        int digit = -1;
+        if (ch >= '0' && ch <= '9') {
+            digit = ch - '0';
+        } else if (ch >= 'a' && ch <= 'f') {
+            digit = 10 + ch - 'a';
+        } else if (ch >= 'A' && ch <= 'F') {
+            digit = 10 + ch - 'A';
+        } else {
+            return std::nullopt;
+        }
+
+        if (parsed > (std::numeric_limits<std::size_t>::max() - static_cast<std::size_t>(digit)) / 16) {
+            return std::nullopt;
+        }
+        parsed = parsed * 16 + static_cast<std::size_t>(digit);
+    }
+
     return parsed;
 }
 
@@ -1906,6 +1936,136 @@ struct EventToken {
     ClientConnection* connection = nullptr;
 };
 
+std::string request_body_spool_template()
+{
+    const auto sequence = g_next_request_body_spool.fetch_add(1, std::memory_order_relaxed);
+    return (std::filesystem::temp_directory_path()
+        / ("rimau-request-body-" + std::to_string(getpid()) + "-" + std::to_string(sequence) + "-XXXXXX"))
+        .string();
+}
+
+class RequestBodyAccumulator {
+public:
+    explicit RequestBodyAccumulator(std::size_t memory_limit)
+        : memory_limit_(memory_limit)
+    {
+    }
+
+    RequestBodyAccumulator(const RequestBodyAccumulator&) = delete;
+    RequestBodyAccumulator& operator=(const RequestBodyAccumulator&) = delete;
+
+    void append(std::string_view data)
+    {
+        if (data.empty()) {
+            return;
+        }
+
+        if (!body_file_ && memory_.size() + data.size() <= memory_limit_) {
+            memory_.append(data);
+            size_ += data.size();
+            return;
+        }
+
+        ensure_spool_file();
+        write_spool(data);
+        size_ += data.size();
+    }
+
+    std::size_t size() const noexcept
+    {
+        return size_;
+    }
+
+    rimau::http::Request finish(rimau::http::Request request)
+    {
+        request.body_size_bytes = size_;
+        if (body_file_) {
+            spool_fd_.reset();
+            request.body.clear();
+            request.body_file = body_file_;
+            return request;
+        }
+
+        request.body = std::move(memory_);
+        return request;
+    }
+
+private:
+    void ensure_spool_file()
+    {
+        if (body_file_) {
+            return;
+        }
+
+        auto path_template = request_body_spool_template();
+        std::vector<char> path_buffer(path_template.begin(), path_template.end());
+        path_buffer.push_back('\0');
+
+        const int fd = mkstemp(path_buffer.data());
+        if (fd < 0) {
+            throw std::runtime_error(std::string("request body spool create failed: ") + std::strerror(errno));
+        }
+        spool_fd_.reset(fd);
+        body_file_ = std::make_shared<rimau::http::RequestBodyFile>(std::filesystem::path(path_buffer.data()));
+
+        if (!memory_.empty()) {
+            write_spool(memory_);
+            memory_.clear();
+            memory_.shrink_to_fit();
+        }
+    }
+
+    void write_spool(std::string_view data)
+    {
+        const char* cursor = data.data();
+        std::size_t remaining = data.size();
+        while (remaining > 0) {
+            const auto chunk = std::min<std::size_t>(remaining, static_cast<std::size_t>(std::numeric_limits<ssize_t>::max()));
+            const ssize_t written = write(spool_fd_.get(), cursor, chunk);
+            if (written < 0 && errno == EINTR) {
+                continue;
+            }
+            if (written <= 0) {
+                throw std::runtime_error(std::string("request body spool write failed: ") + std::strerror(errno));
+            }
+            cursor += written;
+            remaining -= static_cast<std::size_t>(written);
+        }
+    }
+
+    std::size_t memory_limit_;
+    std::size_t size_ = 0;
+    std::string memory_;
+    std::shared_ptr<rimau::http::RequestBodyFile> body_file_;
+    UniqueFd spool_fd_;
+};
+
+enum class ChunkedStreamPhase {
+    size_line,
+    data,
+    data_crlf,
+    trailer_line
+};
+
+struct Http1BodyStreamState {
+    explicit Http1BodyStreamState(std::size_t memory_limit)
+        : accumulator(memory_limit)
+    {
+    }
+
+    rimau::http::Request request;
+    RequestBodyAccumulator accumulator;
+    bool chunked = false;
+    std::size_t header_bytes = 0;
+    std::size_t max_body_bytes = 0;
+    std::size_t content_length = 0;
+    std::size_t received = 0;
+    ChunkedStreamPhase chunked_phase = ChunkedStreamPhase::size_line;
+    std::string line_buffer;
+    std::size_t chunk_remaining = 0;
+    std::size_t crlf_seen = 0;
+};
+
 enum class ClientPhase {
     tls_handshake,
     reading,
@@ -2004,6 +2164,7 @@ public:
         client_ip_.clear();
         security_state_ = nullptr;
         request_buffer_.clear();
+        http1_body_stream_.reset();
         response_buffer_.clear();
         response_offset_ = 0;
         keep_alive_after_response_ = false;
@@ -2106,6 +2267,12 @@ public:
             return false;
         }
 
+        if (waiting_for_body_ && body_started_at_.time_since_epoch().count() != 0
+            && now - body_started_at_ >= std::chrono::seconds(config_->body_timeout_seconds)) {
+            set_response(rimau::http::text_response(408, "Request Timeout\n"), rimau::http::BodyMode::include, false);
+            return true;
+        }
+
         if (requests_served_ > 0 && request_buffer_.empty()) {
             if (!config_->http_keep_alive_enabled || now - last_activity_ >= std::chrono::seconds(config_->idle_timeout_seconds)) {
                 close_now();
@@ -2124,12 +2291,6 @@ public:
         }
 
         if (!waiting_for_body_ && now - request_started_at_ >= std::chrono::seconds(config_->header_timeout_seconds)) {
-            set_response(rimau::http::text_response(408, "Request Timeout\n"), rimau::http::BodyMode::include, false);
-            return true;
-        }
-
-        if (waiting_for_body_ && body_started_at_.time_since_epoch().count() != 0
-            && now - body_started_at_ >= std::chrono::seconds(config_->body_timeout_seconds)) {
             set_response(rimau::http::text_response(408, "Request Timeout\n"), rimau::http::BodyMode::include, false);
             return true;
         }
@@ -2369,6 +2530,10 @@ private:
             waiting_for_body_ = false;
         }
         request_buffer_.append(data, size);
+        if (http1_body_stream_) {
+            process_http1_body_stream();
+            return;
+        }
         process_buffered_request();
     }
 
@@ -2423,6 +2588,11 @@ private:
         }
 
         if (frame.state == rimau::http::Http1FrameState::header_complete) {
+            if (frame.request && frame.waiting_for_body) {
+                start_http1_body_stream(*frame.request, frame);
+                process_http1_body_stream();
+                return;
+            }
             waiting_for_body_ = frame.waiting_for_body;
             if (waiting_for_body_ && body_started_at_.time_since_epoch().count() == 0) {
                 body_started_at_ = std::chrono::steady_clock::now();
@@ -2435,6 +2605,164 @@ private:
         body_started_at_ = {};
         request_started_at_ = request_buffer_.empty() ? std::chrono::steady_clock::time_point {} : std::chrono::steady_clock::now();
         process_request(std::move(frame.raw_request));
+    }
+
+    void start_http1_body_stream(rimau::http::Request request, const rimau::http::Http1FrameResult& frame)
+    {
+        static constexpr std::size_t memory_body_limit = 16 * 1024;
+
+        http1_body_stream_ = std::make_unique<Http1BodyStreamState>(memory_body_limit);
+        auto& stream = *http1_body_stream_;
+        stream.request = std::move(request);
+        stream.chunked = frame.chunked;
+        stream.header_bytes = frame.consumed;
+        stream.max_body_bytes = config_->max_request_bytes > frame.consumed ? config_->max_request_bytes - frame.consumed : 0;
+        stream.content_length = frame.content_length.value_or(0);
+        request_buffer_.erase(0, std::min(request_buffer_.size(), frame.consumed));
+        waiting_for_body_ = true;
+        if (body_started_at_.time_since_epoch().count() == 0) {
+            body_started_at_ = std::chrono::steady_clock::now();
+        }
+    }
+
+    void process_http1_body_stream()
+    {
+        if (!http1_body_stream_) {
+            return;
+        }
+
+        try {
+            if (http1_body_stream_->chunked) {
+                process_chunked_http1_body_stream();
+            } else {
+                process_content_length_http1_body_stream();
+            }
+        } catch (const std::exception& error) {
+            log(LogLevel::warning, std::string("HTTP/1.1 request body stream failed: ") + error.what());
+            http1_body_stream_.reset();
+            request_buffer_.clear();
+            set_response(rimau::http::text_response(500, "Internal Server Error\n"), rimau::http::BodyMode::include, false);
+        }
+    }
+
+    void process_content_length_http1_body_stream()
+    {
+        auto& stream = *http1_body_stream_;
+        while (!request_buffer_.empty() && stream.received < stream.content_length) {
+            const auto take = std::min(stream.content_length - stream.received, request_buffer_.size());
+            stream.accumulator.append(std::string_view(request_buffer_).substr(0, take));
+            request_buffer_.erase(0, take);
+            stream.received += take;
+        }
+
+        if (stream.received == stream.content_length) {
+            finish_http1_body_stream();
+        }
+    }
+
+    void process_chunked_http1_body_stream()
+    {
+        auto& stream = *http1_body_stream_;
+        while (!request_buffer_.empty()) {
+            if (stream.chunked_phase == ChunkedStreamPhase::size_line || stream.chunked_phase == ChunkedStreamPhase::trailer_line) {
+                const auto line_end = request_buffer_.find('\n');
+                if (line_end == std::string::npos) {
+                    stream.line_buffer += request_buffer_;
+                    request_buffer_.clear();
+                    if (stream.line_buffer.size() > 8192) {
+                        fail_http1_body_stream(400, "Bad Request\n");
+                    }
+                    return;
+                }
+
+                stream.line_buffer += request_buffer_.substr(0, line_end + 1);
+                request_buffer_.erase(0, line_end + 1);
+                if (stream.line_buffer.size() < 2 || stream.line_buffer[stream.line_buffer.size() - 2] != '\r') {
+                    fail_http1_body_stream(400, "Bad Request\n");
+                    return;
+                }
+
+                std::string line = stream.line_buffer.substr(0, stream.line_buffer.size() - 2);
+                stream.line_buffer.clear();
+
+                if (stream.chunked_phase == ChunkedStreamPhase::trailer_line) {
+                    if (line.empty()) {
+                        finish_http1_body_stream();
+                        return;
+                    }
+                    if (line.size() > 8192) {
+                        fail_http1_body_stream(400, "Bad Request\n");
+                        return;
+                    }
+                    continue;
+                }
+
+                const auto extension = line.find(';');
+                if (extension != std::string::npos) {
+                    line.erase(extension);
+                }
+                const auto chunk_size = parse_hex_size(trim(std::move(line)));
+                if (!chunk_size) {
+                    fail_http1_body_stream(400, "Bad Request\n");
+                    return;
+                }
+                if (*chunk_size == 0) {
+                    stream.chunked_phase = ChunkedStreamPhase::trailer_line;
+                    continue;
+                }
+                stream.chunk_remaining = *chunk_size;
+                stream.chunked_phase = ChunkedStreamPhase::data;
+                continue;
+            }
+
+            if (stream.chunked_phase == ChunkedStreamPhase::data) {
+                const auto take = std::min(stream.chunk_remaining, request_buffer_.size());
+                if (stream.accumulator.size() + take > stream.max_body_bytes) {
+                    fail_http1_body_stream(413, "Content Too Large\n");
+                    return;
+                }
+                stream.accumulator.append(std::string_view(request_buffer_).substr(0, take));
+                request_buffer_.erase(0, take);
+                stream.chunk_remaining -= take;
+                if (stream.chunk_remaining == 0) {
+                    stream.chunked_phase = ChunkedStreamPhase::data_crlf;
+                    stream.crlf_seen = 0;
+                }
+                continue;
+            }
+
+            if (stream.chunked_phase == ChunkedStreamPhase::data_crlf) {
+                const char expected = stream.crlf_seen == 0 ? '\r' : '\n';
+                if (request_buffer_.front() != expected) {
+                    fail_http1_body_stream(400, "Bad Request\n");
+                    return;
+                }
+                request_buffer_.erase(0, 1);
+                ++stream.crlf_seen;
+                if (stream.crlf_seen == 2) {
+                    stream.chunked_phase = ChunkedStreamPhase::size_line;
+                }
+            }
+        }
+    }
+
+    void fail_http1_body_stream(int status, std::string message)
+    {
+        http1_body_stream_.reset();
+        request_buffer_.clear();
+        waiting_for_body_ = false;
+        body_started_at_ = {};
+        set_response(rimau::http::text_response(status, std::move(message)), rimau::http::BodyMode::include, false);
+    }
+
+    void finish_http1_body_stream()
+    {
+        auto stream = std::move(http1_body_stream_);
+        waiting_for_body_ = false;
+        body_started_at_ = {};
+        request_started_at_ = request_buffer_.empty() ? std::chrono::steady_clock::time_point {} : std::chrono::steady_clock::now();
+        auto request = stream->accumulator.finish(std::move(stream->request));
+        dispatch_request(std::move(request));
     }
 
     bool try_handle_websocket_upgrade(const rimau::http::Request& request, std::size_t consumed)
@@ -3059,18 +3387,23 @@ private:
             return;
         }
 
+        dispatch_request(*parsed.request);
+    }
+
+    void dispatch_request(rimau::http::Request request)
+    {
         if (security_state_ && !security_state_->allow_request(client_ip_, *config_)) {
             set_response(rimau::http::text_response(429, "Too Many Requests\n"), rimau::http::BodyMode::include, false);
             return;
         }
 
-        if (auto waf_response = inspect_waf(*parsed.request)) {
+        if (auto waf_response = inspect_waf(request)) {
             set_response(std::move(*waf_response), rimau::http::BodyMode::include, false);
             return;
         }
 
         ++requests_served_;
-        bool keep_alive = request_should_keep_alive(*parsed.request);
+        bool keep_alive = request_should_keep_alive(request);
         if (requests_served_ >= config_->http_keep_alive_max_requests) {
             keep_alive = false;
         }
@@ -3080,7 +3413,7 @@ private:
             config_->virtual_hosts_enabled ? config_->virtual_hosts : "",
             reverse_proxy_settings());
         BufferedResponseSink downstream;
-        rimau::http::Transaction transaction(static_cast<std::uint64_t>(requests_served_), *parsed.request);
+        rimau::http::Transaction transaction(static_cast<std::uint64_t>(requests_served_), std::move(request));
         transaction.dispatch(handler_factory, downstream);
 
         if (!downstream.sent()) {
@@ -3800,6 +4133,7 @@ private:
     bool http2_active_ = false;
     std::uint32_t http2_last_client_stream_id_ = 0;
     std::unordered_map<std::uint32_t, Http2StreamState> http2_streams_;
+    std::unique_ptr<Http1BodyStreamState> http1_body_stream_;
     int requests_served_ = 0;
     std::chrono::steady_clock::time_point last_activity_;
     std::chrono::steady_clock::time_point request_started_at_;

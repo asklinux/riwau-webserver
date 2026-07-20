@@ -352,6 +352,7 @@ Http1FrameResult next_http1_request_frame(std::string_view buffered, const Http1
             result.state = Http1FrameState::header_complete;
             result.request = header_parse.request;
             result.consumed = body_start;
+            result.chunked = true;
             return result;
         }
         const bool chunked_too_large = decoded.consumed > options.max_request_bytes || body_start > options.max_request_bytes - decoded.consumed;
@@ -363,6 +364,7 @@ Http1FrameResult next_http1_request_frame(std::string_view buffered, const Http1
         Http1FrameResult result;
         result.state = Http1FrameState::complete;
         result.request = header_parse.request;
+        result.chunked = true;
         result.raw_request = std::string(buffered.substr(0, body_start));
         result.raw_request += decoded.body;
         result.consumed = body_start + decoded.consumed;
@@ -379,6 +381,7 @@ Http1FrameResult next_http1_request_frame(std::string_view buffered, const Http1
         Http1FrameResult result = incomplete_frame(body_size > 0);
         result.state = Http1FrameState::header_complete;
         result.request = header_parse.request;
+        result.content_length = body_size;
         result.consumed = body_start;
         return result;
     }
@@ -386,6 +389,7 @@ Http1FrameResult next_http1_request_frame(std::string_view buffered, const Http1
     Http1FrameResult result;
     result.state = Http1FrameState::complete;
     result.request = header_parse.request;
+    result.content_length = body_size;
     result.raw_request = std::string(buffered.substr(0, total_size));
     result.consumed = total_size;
     return result;

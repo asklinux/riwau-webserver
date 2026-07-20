@@ -745,3 +745,28 @@ Licensing is a project ownership decision, not an implementation inference. The 
 Consequence:
 
 Treat GPL-3.0 as the current repository license marker when preserving files and planning bundled dependencies, but keep the final license intent marked `Needs verification` until the project owner confirms it.
+
+## ADR-0029: Use File-Backed HTTP/1.1 Request Body Spooling As Interim Large-Upload Support
+
+- Date: 2026-07-20
+- Status: Accepted
+
+Decision:
+
+For the current HTTP/1.1 path, large request bodies are accumulated through a bounded-memory `RequestBodyAccumulator` before handler dispatch. Bodies stay in memory up to 16 KiB; larger bodies are written to a `mkstemp`-created temporary file and exposed through `rimau::http::RequestBodyFile`.
+
+Implementation:
+
+- Add `RequestBodyFile` RAII cleanup for temporary request-body files.
+- Add `Request::body_size()`, `Request::body_spooled_to_file()`, and `Request::body_text(max_bytes)`.
+- When `next_http1_request_frame` reports headers complete but body incomplete, `ClientConnection` switches into a body accumulation state for Content-Length or chunked bodies.
+- WAF inspection reads bounded body text through `Request::body_text(limit)`.
+- Static method scaffold responses report `body_spooled` and `body_truncated`.
+
+Reason:
+
+Rimau needs to stop requiring large uploads to live entirely in `Request::body` memory before the full handler-level streaming API is designed. File-backed spooling gives a smaller, testable step that keeps the existing transaction pipeline stable.
+
+Consequence:
+
+This does not complete streaming request body support. Handler dispatch still waits for the full request body. Normal HTTP reverse proxy forwarding still reads the spooled body into memory before sending upstream. A future design must add handler-visible body streams, response chunking, reverse proxy request/response streaming, and explicit backpressure semantics.

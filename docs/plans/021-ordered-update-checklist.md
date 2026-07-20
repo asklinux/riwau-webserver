@@ -40,6 +40,7 @@ Untuk setiap item:
   - Done criteria: semua behavior utama HTTP/1.1 ada coverage automatik.
 - [ ] Implement streaming request body dengan backpressure.
   - Done criteria: large upload tidak perlu buffer seluruh body dalam memori.
+  - Status: Partial; HTTP/1.1 body besar kini discroll ke fail sementara selepas header lengkap, tetapi handler-level streaming API, reverse proxy request streaming, dan backpressure contract penuh belum siap.
 - [ ] Implement response chunking.
   - Done criteria: handler boleh hantar response streaming tanpa `Content-Length` awal.
 - [ ] Implement multipart range dan `If-Range`.

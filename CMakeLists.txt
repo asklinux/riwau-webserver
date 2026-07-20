@@ -391,6 +391,13 @@ if(RIMAU_ENABLE_TESTS)
             "-DRIMAU_SERVER=$<TARGET_FILE:rimau-server>"
             "-DRIMAU_TEST_DIR=${CMAKE_BINARY_DIR}/test-runtime"
             -P "${CMAKE_SOURCE_DIR}/tests/test_cli_config.cmake")
+    add_test(
+        NAME rimau_http1_network
+        COMMAND
+            "${RIMAU_PYTHON3_EXECUTABLE}"
+            "${CMAKE_SOURCE_DIR}/tests/test_http1_network.py"
+            "$<TARGET_FILE:rimau-server>"
+            "${CMAKE_BINARY_DIR}/test-runtime")
 endif()
 
 install(TARGETS rimau-server RUNTIME DESTINATION bin)

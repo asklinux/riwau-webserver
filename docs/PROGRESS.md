@@ -86,6 +86,7 @@ Implemented:
 - Proxygen-inspired request handler pipeline.
 - `RequestHandler`, `RequestHandlerFactory`, `Transaction`, `ResponseSink`, `ResponseBuilder`, and `StaticFileHandler`.
 - Static document root `public/`.
+- HTTP/1.1 network integration CTest for keep-alive, max request cap, idle timeout, pipelining, chunked body, range, gzip, WebSocket echo, and WebSocket proxy.
 - Parser unit test melalui CTest.
 - Handler pipeline unit test melalui CTest.
 - Response serializer unit test melalui CTest.
@@ -147,7 +148,7 @@ Semasa pemeriksaan awal pada 2026-07-18:
 | Request pipeline | Partial | Handler/factory/transaction/response sink implemented for static, vhost, reverse proxy, and script-placeholder HTTP/1.1. |
 | Config | Partial | SQLite table `rimau_config`, schema metadata table `rimau_schema_migrations`, protocol, TLS, keep-alive, timeout, rate-limit, IP-list, security-header, virtual-host/proxy keys, and limited SIGHUP reload behavior. |
 | Security | Partial | Baseline HTTP framing hardening, timeout, rate limit, connection limit, built-in ModSecurity-compatible WAF subset, configurable security header values, and IPv4/IPv6 IP allow/block list are implemented; fuzzing, full ModSecurity/CRS integration, and production hardening remain pending. |
-| Tests | Partial | Parser, HTTP/1.1 session/framing, response serializer, handler pipeline, SQLite config, CLI config, protocol capability, HTTP/2 wire, HTTP/3 wire, virtual host, and WAF tests. |
+| Tests | Partial | Parser, HTTP/1.1 session/framing, HTTP/1.1 network integration, response serializer, handler pipeline, SQLite config, CLI config, protocol capability, HTTP/2 wire, HTTP/3 wire, virtual host, and WAF tests. |
 | Deployment | Planned | No production deployment files. |
 | Database | Partial | SQLite is used for runtime configuration only; the SQLite engine is bundled static and config schema version `1` is recorded. |
 | I/O model | Partial | Linux `epoll` reactor with per-worker event loops and SO_REUSEPORT implemented; benchmarks still pending. |
@@ -1191,3 +1192,27 @@ Result:
 - Build passed; static glibc DNS/NSS linker warnings for `getaddrinfo`/OpenSSL `gethostbyname` remain.
 - CTest passed, 11/11 tests.
 - Pipelined HTTP/1.1 keep-alive smoke passed.
+
+HTTP/1.1 network integration test update:
+
+- Added `tests/test_http1_network.py`.
+- Added CTest case `rimau_http1_network`.
+- The test starts `rimau-server` with a temporary SQLite database and temporary document root.
+- Automated coverage now includes HTTP/1.1 keep-alive, keep-alive max request cap, idle timeout, request pipelining, chunked request body decoding, single range response, gzip static response, local WebSocket echo, and WebSocket reverse proxy tunneling through a Python upstream.
+- Marked the Phase 1 HTTP/1.1 integration checklist item complete in `docs/plans/021-ordered-update-checklist.md`.
+
+Validation on 2026-07-20 after HTTP/1.1 network integration test update:
+
+```bash
+cmake -S . -B build
+cmake --build build
+ctest --test-dir build --output-on-failure -R rimau_http1_network
+ctest --test-dir build --output-on-failure
+```
+
+Result:
+
+- CMake configure passed.
+- Build passed.
+- `rimau_http1_network` passed.
+- CTest passed, 12/12 tests.

@@ -14,7 +14,6 @@
 ## P1 - HTTP/1.1 Completion
 
 - Add transaction IDs that are unique per connection/session.
-- Add integration tests for HTTP/1.1 keep-alive, max request cap, idle timeout, request pipelining, chunked bodies, range responses, gzip responses, WebSocket echo, and WebSocket reverse proxy tunneling.
 - Add integration tests for virtual host routing, fallback host behavior, reverse proxy success/failure, WebSocket proxy HTTP/HTTPS upstream behavior, and script-placeholder 501 behavior.
 - Add streaming request body API with backpressure for large uploads.
 - Expose chunked trailers to handlers or explicitly discard them through a documented policy.

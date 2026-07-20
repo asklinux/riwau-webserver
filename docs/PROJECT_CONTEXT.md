@@ -139,6 +139,7 @@ Not present:
     |-- test_handler_pipeline.cpp
     |-- test_http1_session.cpp
     |-- test_http_parser.cpp
+    |-- test_http1_network.py
     |-- test_http2_wire.cpp
     |-- test_http3_wire.cpp
     |-- test_http_response.cpp
@@ -372,6 +373,7 @@ Production deployment, service manager, packaging, container, TLS certificate ha
 - Response serializer test asas melalui CTest.
 - Handler pipeline test asas melalui CTest.
 - HTTP/1.1 session/framing test melalui CTest tanpa socket event loop.
+- HTTP/1.1 network integration test melalui CTest untuk keep-alive, max request cap, idle timeout, pipelining, chunked body, range, gzip, WebSocket echo, dan WebSocket proxy.
 - SQLite config database test asas melalui CTest.
 - CLI integration test melalui CTest untuk `--database`, `--set`, `--check-config`, dan `--protocols`.
 - Protocol capability test asas melalui CTest.

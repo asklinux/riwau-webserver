@@ -36,7 +36,7 @@ Untuk setiap item:
 
 - [x] Pisahkan HTTP/1.1 codec/session daripada `ClientConnection`.
   - Done criteria: parsing/framing HTTP/1.1 boleh diuji tanpa socket event loop.
-- [ ] Tambah integration tests untuk keep-alive, max request cap, idle timeout, pipelining, chunked body, range, gzip, WebSocket echo, dan WebSocket proxy.
+- [x] Tambah integration tests untuk keep-alive, max request cap, idle timeout, pipelining, chunked body, range, gzip, WebSocket echo, dan WebSocket proxy.
   - Done criteria: semua behavior utama HTTP/1.1 ada coverage automatik.
 - [ ] Implement streaming request body dengan backpressure.
   - Done criteria: large upload tidak perlu buffer seluruh body dalam memori.

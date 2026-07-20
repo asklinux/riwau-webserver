@@ -46,7 +46,6 @@
 
 - Add production certificate management guidance.
 - Add OCSP stapling. Needs verification.
-- Add automated TLS ALPN `h2` integration test using a real HTTP/2 client, beyond the current Python SSL raw-frame smoke.
 - Add automated test that ALPN advertises only implemented or explicitly partial-tested protocols and still rejects `h3`.
 - Add tests for TLS config failure modes.
 - Add automated integration test for multi-certificate SNI certificate selection.
@@ -76,7 +75,7 @@
 - Complete HPACK support including Huffman and persistent dynamic table behavior, or replace baseline HPACK with chosen library.
 - Add flow control integration.
 - Harden TLS ALPN `h2` serving after HTTP/2 session behavior is validated.
-- Add integration tests using a real HTTP/2 client for h2c and TLS `h2`.
+- Add integration tests using a real HTTP/2 client for h2c and TLS `h2` that require successful HTTP responses. Current `rimau_tls_alpn_h2_curl` covers TLS ALPN negotiation with curl/nghttp2 but still accepts the known HPACK Huffman `COMPRESSION_ERROR` request path until full HPACK support is implemented.
 
 ## P2 - HTTP/3
 

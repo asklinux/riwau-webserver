@@ -83,8 +83,9 @@ Untuk setiap item:
 
 ## Phase 3: TLS And Certificate Lifecycle
 
-- [ ] Tambah automated TLS ALPN `h2` test dengan real HTTP/2 client.
+- [x] Tambah automated TLS ALPN `h2` test dengan real HTTP/2 client.
   - Done criteria: bukan hanya Python raw-frame smoke.
+  - Status: Added CTest `rimau_tls_alpn_h2_curl` via `tests/test_tls_alpn_h2_curl.py`; it starts temporary TLS Rimau config, uses bundled OpenSSL for a dev cert, runs `curl --http2`, and verifies real-client ALPN selection of `h2`. Current test accepts the known partial HTTP/2 HPACK Huffman `COMPRESSION_ERROR` path, so full real-client HTTP/2 request success remains Phase 4 work.
 - [ ] Tambah automated multi-certificate SNI selection test.
   - Done criteria: cert dipilih mengikut host exact/wildcard.
 - [ ] Tambah OCSP stapling decision/implementation.

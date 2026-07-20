@@ -84,6 +84,7 @@ Implemented:
 - HTTP/2 HPACK baseline for static-table indexed fields, literal fields without Huffman, and literal incremental decode without dynamic-table persistence.
 - Partial HTTP/2 h2c prior-knowledge request serving: client preface + SETTINGS in, SETTINGS + SETTINGS ACK out, HEADERS/DATA request parsing, shared handler pipeline dispatch, and HTTP/2 HEADERS/DATA responses.
 - Partial HTTP/2 TLS ALPN `h2` request serving using the same preface, SETTINGS, HEADERS/DATA, shared handler pipeline, and HTTP/2 response serialization path.
+- Automated TLS ALPN `h2` real-client smoke through CTest target `rimau_tls_alpn_h2_curl` using `curl --http2`/nghttp2 when available; this verifies ALPN selection, not full HTTP/2 curl request success.
 - HTTP/3 QUIC varint parser/serializer.
 - HTTP/3 frame parser/serializer and SETTINGS payload codec.
 - WAF unit test dan false-positive regression corpus melalui CTest.
@@ -146,7 +147,7 @@ Semasa pemeriksaan awal pada 2026-07-18:
 | Build system | Implemented | CMake with bundled static OpenSSL, SQLite, zlib, Bison, Linux UAPI headers, and glibc targets; `rimau-server` is fully static in current Linux x86_64 validation. |
 | CLI | Partial | `--database`, `--set`, `--check-config`, `--protocols`, `--version`, `--help`. |
 | HTTP/1.1 | Partial | GET/HEAD static, POST/PUT/PATCH/DELETE JSON scaffold, OPTIONS, Content-Length, chunked decode, file-backed large-body spooling, pull request-body reader, basic chunked response API, keep-alive, basic pipelining, single/multipart range with `If-Range`, gzip, configurable directory index/custom error page, WebSocket echo, WebSocket reverse proxy tunnel, and extracted testable request framing. |
-| HTTP/2 | Partial | Frame codec, SETTINGS/PING basics, HPACK baseline, cleartext h2c and TLS ALPN `h2` HEADERS/DATA request serving through the shared handler pipeline exist; no production flow control, CONTINUATION assembly, HPACK Huffman, or dynamic-table persistence yet. |
+| HTTP/2 | Partial | Frame codec, SETTINGS/PING basics, HPACK baseline, cleartext h2c and TLS ALPN `h2` HEADERS/DATA request serving through the shared handler pipeline exist; real-client TLS ALPN `h2` negotiation is covered with curl/nghttp2, but no production flow control, CONTINUATION assembly, HPACK Huffman, dynamic-table persistence, or full real-client request success yet. |
 | HTTP/3 | Partial | QUIC varint, frame codec, and SETTINGS codec exist; no UDP/QUIC/QPACK/live serving yet. |
 | TLS | Partial | HTTP/1.1 HTTPS and partial HTTP/2 ALPN `h2` via bundled static OpenSSL 4.0.1 with TLS 1.2/1.3, SNI validation, multi-certificate SNI selection, ALPN `http/1.1`/`h2`, safe cipher config, and SIGHUP context reload for new connections. |
 | Static files | Partial | Serves from `document_root`, supports configurable directory index/custom error page, MIME detection, gzip, single/multipart range, and `If-Range`; no zero-copy path yet. |
@@ -156,7 +157,7 @@ Semasa pemeriksaan awal pada 2026-07-18:
 | Request pipeline | Partial | Handler/factory/transaction/response sink implemented for static, vhost, reverse proxy, and script-placeholder HTTP/1.1. |
 | Config | Partial | SQLite table `rimau_config`, schema metadata table `rimau_schema_migrations`, protocol, TLS, keep-alive, static file, timeout, rate-limit, IP-list, security-header, virtual-host/proxy keys, and limited SIGHUP reload behavior. |
 | Security | Partial | Baseline HTTP framing hardening, timeout, rate limit, connection limit, built-in ModSecurity-compatible WAF subset with per-host overrides and structured redacted audit events, configurable security header values, IPv4/IPv6 IP allow/block list, and deterministic parser/framing fuzz smoke are implemented; broader fuzzing and production hardening remain pending, while full ModSecurity/CRS integration is deferred beyond P1 by ADR-0034. |
-| Tests | Partial | Parser, HTTP/1.1 session/framing, deterministic HTTP parser/framing fuzz smoke, HTTP/1.1 network integration including request-smuggling rejection, rate limiting, connection limits, request/header/body/idle timeout slow-client behavior, WAF block paths for HTTP/1.1/WebSocket/WebSocket proxy/partial HTTP/2, WAF virtual-host override and audit-log redaction behavior, WAF false-positive corpus, response serializer, handler pipeline, SQLite config, CLI config, protocol capability, HTTP/2 wire, HTTP/3 wire, virtual host, and WAF tests. |
+| Tests | Partial | Parser, HTTP/1.1 session/framing, deterministic HTTP parser/framing fuzz smoke, TLS ALPN `h2` real-client curl smoke, HTTP/1.1 network integration including request-smuggling rejection, rate limiting, connection limits, request/header/body/idle timeout slow-client behavior, WAF block paths for HTTP/1.1/WebSocket/WebSocket proxy/partial HTTP/2, WAF virtual-host override and audit-log redaction behavior, WAF false-positive corpus, response serializer, handler pipeline, SQLite config, CLI config, protocol capability, HTTP/2 wire, HTTP/3 wire, virtual host, and WAF tests. |
 | Deployment | Planned | No production deployment files. |
 | Database | Partial | SQLite is used for runtime configuration only; the SQLite engine is bundled static and config schema version `1` is recorded. |
 | I/O model | Partial | Linux `epoll` reactor with per-worker event loops and SO_REUSEPORT implemented; benchmarks still pending. |
@@ -167,17 +168,30 @@ Most recent completed on 2026-07-20:
 
 ```bash
 cmake -S . -B build
-cmake --build build --target rimau-http-fuzz-tests
-ctest --test-dir build --output-on-failure -R rimau_http_fuzz
+python3 -m py_compile tests/test_tls_alpn_h2_curl.py
+ctest --test-dir build --output-on-failure -R rimau_tls_alpn_h2_curl
 ctest --test-dir build --output-on-failure
+cmake --build build --target rimau-server
+git diff --check
 ```
 
 Result:
 
 - CMake configure passed.
-- `rimau-http-fuzz-tests` target built.
-- `rimau_http_fuzz` passed, 1/1.
-- Full CTest passed, 13/13.
+- Python syntax check for `tests/test_tls_alpn_h2_curl.py` passed.
+- `rimau_tls_alpn_h2_curl` passed, 1/1.
+- Full CTest passed, 14/14.
+- `rimau-server` target built.
+- Diff whitespace check passed.
+
+Phase 3 TLS ALPN `h2` real-client smoke update:
+
+- Added `tests/test_tls_alpn_h2_curl.py`.
+- Added CTest target `rimau_tls_alpn_h2_curl`.
+- Test starts a temporary TLS Rimau server, generates a self-signed test certificate with the bundled OpenSSL binary, runs `curl --http2`, and verifies real-client ALPN selection of `h2`.
+- Test skips only when `curl` is missing or does not report HTTP2 support.
+- Current test accepts the known partial HTTP/2 HPACK Huffman `COMPRESSION_ERROR` request path, so this validates ALPN negotiation only; full curl/nghttp2 HTTP/2 request success remains pending.
+- Added ADR-0037 and marked the Phase 3 ordered checklist item complete.
 
 Phase 2 structured WAF audit log update:
 

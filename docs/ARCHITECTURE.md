@@ -651,10 +651,11 @@ Current:
 - Basic HTTP/2 frame validation for SETTINGS, PING, GOAWAY, WINDOW_UPDATE, RST_STREAM, DATA, HEADERS, and CONTINUATION.
 - HPACK baseline for static-table indexed fields, literal fields without Huffman, and literal incremental decode without dynamic-table persistence.
 - When `http2_enabled=true`, Rimau accepts h2c or TLS ALPN `h2` client preface + SETTINGS, replies SETTINGS + SETTINGS ACK, handles SETTINGS ACK/PING/RST_STREAM/WINDOW_UPDATE basics, decodes HEADERS/DATA for complete streams, dispatches to `Transaction`, and writes HTTP/2 response HEADERS/DATA frames.
+- Automated CTest `rimau_tls_alpn_h2_curl` starts a temporary TLS Rimau server and uses `curl --http2` as a real HTTP/2 client to verify ALPN selects `h2`.
 
 Required future work:
 
-- Dedicated automated real-client ALPN `h2` integration tests beyond the current Python SSL raw-frame smoke.
+- Upgrade the current curl ALPN smoke to require successful HTTP/2 responses after HPACK Huffman/dynamic-table behavior is implemented.
 - Dedicated HTTP/2 connection/session module instead of the current `ClientConnection` inline partial path.
 - Full HPACK header compression, including Huffman and dynamic table persistence.
 - Complete stream lifecycle and broad multiplexing behavior.
@@ -769,6 +770,7 @@ Missing:
 - Privilege dropping.
 - Full parser hardening beyond the deterministic `rimau_http_fuzz` CTest smoke.
 - Continuous or sanitizer-backed fuzz testing beyond the deterministic CTest smoke.
+- Full real-client HTTP/2 request success with curl/nghttp2; the current curl test verifies ALPN `h2` selection but accepts the known HPACK Huffman `COMPRESSION_ERROR` request path.
 - Full `libmodsecurity` transaction engine integration and full OWASP Core Rule Set bundle are deferred beyond P1 by ADR-0034. Needs verification.
 - Rich WAF rule tuning beyond ADR-0035, dedicated WAF audit log persistence beyond ADR-0036, and ModSecurity rule syntax parsing.
 - Advanced slow-client scoring.

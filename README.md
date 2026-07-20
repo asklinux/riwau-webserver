@@ -23,10 +23,10 @@ Pada Linux x86_64 dengan GNU/Clang, CMake membina GNU glibc 2.43 daripada source
 
 - Static files dibaca dari SQLite `document_root`.
 - POST, PUT, PATCH, dan DELETE belum memutasi fail; handler semasa pulang JSON metadata/body scaffold.
-- Range support ialah single byte range sahaja.
+- Range support menyokong single dan multipart byte ranges dengan `If-Range`.
 - Compression semasa ialah gzip sahaja; Brotli belum implemented.
 - WebSocket semasa ialah basic RFC 6455 echo untuk host bukan proxy, dan reverse proxy tunnel untuk proxy vhost HTTP/HTTPS upstream. Tiada fragmentation handling penuh, extensions, subprotocol routing tempatan, atau application routing.
-- Request body dan static file response masih dibuffer dalam memori; streaming body dan zero-copy static file path belum implemented.
+- Request body besar untuk HTTP/1.1 boleh discroll ke fail sementara sebelum handler dispatch dan dibaca melalui `RequestBodyReader`; live streaming sebelum dispatch, producer-side response streaming, dan zero-copy static file path belum implemented.
 - Request smuggling checks menolak invalid/duplicate `Content-Length`, konflik `Content-Length`/`Transfer-Encoding`, duplicate/unsupported `Transfer-Encoding`, obs-fold, dan bare CR/LF.
 - Security controls termasuk request/header/body/idle timeout, global/per-IP connection limit, fixed-window per-IP rate limit, built-in ModSecurity-compatible WAF subset, IPv4/IPv6 exact/CIDR allowlist/blocklist, SQLite-configurable security header values, dan `server_header_enabled=false`.
 - WAF semasa ialah subset OWASP CRS-inspired yang dikompil dalam kod Rimau untuk scanner user-agent, request splitting/CRLF, path traversal, XSS, SQLi, RCE, PHP wrapper injection, dan Java/JNDI exploit patterns. Ini bukan full `libmodsecurity` dan bukan full OWASP Core Rule Set.
@@ -39,6 +39,7 @@ Pada Linux x86_64 dengan GNU/Clang, CMake membina GNU glibc 2.43 daripada source
 - HTTP/2 frame parser/serializer menyokong header 9-byte, frame length, type, flags, stream id, SETTINGS payload, dan validasi asas untuk SETTINGS, PING, GOAWAY, WINDOW_UPDATE, RST_STREAM, DATA, HEADERS, dan CONTINUATION.
 - HPACK HTTP/2 semasa menyokong static table, literal string tanpa Huffman, dan decode literal incremental indexing tanpa menyimpan dynamic table. Dynamic table reference, Huffman decoding, full flow control, priority, dan continuation assembly belum implemented.
 - Jika `http2_enabled=true`, cleartext h2c prior-knowledge dan TLS ALPN `h2` client preface boleh diproses: Rimau parse client SETTINGS, balas SETTINGS/ACK, parse HEADERS/DATA non-Huffman, dispatch ke pipeline `Transaction`, dan serialize response sebagai HTTP/2 HEADERS/DATA frame.
+- CTest `rimau_tls_alpn_h2_curl` menggunakan `curl --http2` sebagai real HTTP/2 client untuk mengesahkan TLS ALPN memilih `h2`. Ia belum membuktikan full curl request success kerana HPACK Huffman masih belum implemented.
 - HTTP/3 codec primitive menyokong QUIC varint, frame parser/serializer, dan SETTINGS payload. Ini belum termasuk UDP listener, QUIC transport, TLS 1.3 QUIC handshake, QPACK, stream lifecycle, atau request adapter.
 - ALPN boleh mengiklankan `http/1.1` dan `h2` apabila `http2_enabled=true` serta `tls_alpn_protocols` mengandungi `h2`. `h3` masih ditolak dalam config sehingga HTTP/3 request serving siap dan diuji.
 
@@ -49,6 +50,7 @@ cmake -S . -B build
 cmake --build build
 ctest --test-dir build --output-on-failure
 ctest --test-dir build --output-on-failure -R rimau_http_fuzz
+ctest --test-dir build --output-on-failure -R rimau_tls_alpn_h2_curl
 ```
 
 Build pertama memerlukan network untuk source archive yang dipin dalam `CMakeLists.txt` kecuali cache CMake sudah ada. Build-time masih memerlukan compiler dan tool asas host seperti `gcc`/`g++`, `make`, `perl`, `gawk`, `msgfmt`, `python3`, dan `m4`; sasaran yang dibuang ialah runtime shared-library dependency untuk binary deployable. Bundled glibc semasa hanya wired untuk Linux x86_64.

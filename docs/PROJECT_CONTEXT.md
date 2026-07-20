@@ -62,6 +62,7 @@ Implemented:
 - SQLite-backed protocol enable flags untuk HTTP/1.1, partial h2c/TLS ALPN `h2` HTTP/2 serving, dan HTTP/3 status/control-plane
 - HTTP/2 frame parser/serializer, SETTINGS payload parser/serializer, dan HPACK static-table/literal-no-Huffman baseline dengan literal incremental decode tanpa dynamic-table persistence
 - Partial HTTP/2 request serving dalam server untuk cleartext h2c dan TLS ALPN `h2`: parse client preface, SETTINGS, PING, HEADERS, DATA; dispatch request ke shared handler pipeline; reply HTTP/2 HEADERS/DATA
+- Automated TLS ALPN `h2` CTest with real `curl --http2` client that verifies ALPN selects `h2`; full curl request success still hits the known partial HPACK Huffman limit until HTTP/2 HPACK is completed
 - HTTP/3 QUIC varint parser/serializer, frame parser/serializer, dan SETTINGS payload parser/serializer
 
 Planned:
@@ -144,6 +145,7 @@ Not present:
     |-- test_http1_session.cpp
     |-- test_http_parser.cpp
     |-- test_http1_network.py
+    |-- test_tls_alpn_h2_curl.py
     |-- test_http2_wire.cpp
     |-- test_http3_wire.cpp
     |-- test_http_response.cpp
@@ -197,6 +199,7 @@ Run tests:
 
 ```bash
 ctest --test-dir build --output-on-failure
+ctest --test-dir build --output-on-failure -R rimau_tls_alpn_h2_curl
 ```
 
 Shortcut:
@@ -387,6 +390,7 @@ Production deployment, service manager, packaging, container, TLS certificate ha
 - Deterministic parser/framing fuzz smoke melalui CTest target `rimau_http_fuzz`.
 - HTTP/1.1 network integration test melalui CTest untuk keep-alive, max request cap, request/header/body/idle timeout, pipelining, chunked body, request-smuggling rejection, rate limiting, connection limits, slow-client behavior, WAF block paths untuk HTTP/1.1/WebSocket/WebSocket proxy/partial HTTP/2, range, gzip, directory index, custom error page, WebSocket echo, dan WebSocket proxy.
 - HTTP/1.1 network integration test juga meliputi `virtual_host_waf_overrides` untuk default WAF block dan per-host allow path melalui `enabled:false`, `rule_exceptions`, dan threshold lebih tinggi.
+- TLS ALPN `h2` real-client integration test melalui CTest target `rimau_tls_alpn_h2_curl`; test ini guna `curl --http2`/nghttp2 apabila tersedia dan mengesahkan server memilih ALPN `h2`.
 - WAF false-positive regression corpus melalui CTest untuk trafik normal curl, browser navigation/static asset, JSON API, form submission, dan WebSocket upgrade.
 - SQLite config database test asas melalui CTest.
 - CLI integration test melalui CTest untuk `--database`, `--set`, `--check-config`, dan `--protocols`.
@@ -402,7 +406,7 @@ Production deployment, service manager, packaging, container, TLS certificate ha
 ## Current Implementation Status
 
 - HTTP/1.1: Partial; body besar boleh discroll ke fail sementara dan dibaca handler melalui pull reader, basic chunked response API, multipart range/`If-Range`, configurable directory index, dan custom error page sudah ada. Live in-flight request streaming sebelum handler dispatch, reverse proxy body streaming, dan producer-side async response backpressure belum lengkap.
-- HTTP/2: Partial h2c dan TLS ALPN `h2` request serving; frame codec, SETTINGS/PING, HEADERS/DATA path, HPACK baseline, and shared handler pipeline dispatch exist. Continuation assembly, full HPACK dynamic/Huffman behavior, and flow control masih Planned.
+- HTTP/2: Partial h2c dan TLS ALPN `h2` request serving; frame codec, SETTINGS/PING, HEADERS/DATA path, HPACK baseline, real-client TLS ALPN `h2` negotiation coverage, and shared handler pipeline dispatch exist. Continuation assembly, full HPACK dynamic/Huffman behavior, real-client request success, and flow control masih Planned.
 - HTTP/3: Partial wire codec primitives; UDP/QUIC/QPACK/live request serving masih Planned.
 - TLS: Partial for HTTP/1.1 HTTPS and HTTP/2 ALPN `h2` basics with TLS 1.2/1.3, SNI validation, multi-certificate SNI selection, ALPN `http/1.1`/`h2`, safe cipher config, and new-connection certificate reload.
 - Event loop performance architecture: Partial with Linux `epoll` backend.
@@ -429,6 +433,7 @@ Production deployment, service manager, packaging, container, TLS certificate ha
 - Compression hanya gzip melalui bundled static zlib; Brotli ditangguh dalam P1 kerana tiada bundled dependency yang diterima.
 - `rimau-server` semasa validated sebagai static ELF: `ldd build/rimau-server` melaporkan `not a dynamic executable`, dan `readelf` tidak menunjukkan dynamic interpreter. Caveat: static glibc DNS/NSS untuk `getaddrinfo`/`gethostbyname` masih memberi linker warning dan perlu ujian production tambahan, terutama reverse proxy upstream hostname. Needs verification.
 - HTTP/2 support baru melayan request asas melalui cleartext h2c prior knowledge dan TLS ALPN `h2`; full multiplexing semantics, continuation assembly, HPACK Huffman, HPACK dynamic table persistence, dan flow control penuh belum implemented.
+- Automated `curl --http2` TLS ALPN test verifies that a real HTTP/2 client negotiates `h2`, but curl/nghttp2 request completion can still fail with `COMPRESSION_ERROR` because HPACK Huffman decode is not implemented yet.
 - HTTP/3 support belum live di network; codec semasa hanya QUIC varint/frame/SETTINGS primitives tanpa QUIC transport atau QPACK.
 - WebSocket support masih basic; local echo belum menyokong fragmentation, extensions, subprotocol negotiation, backpressure policy khusus, atau application routing. WebSocket proxy melakukan tunnel stream, tetapi tidak memeriksa frame WebSocket secara lengkap untuk fragment/subprotocol policy.
 - Reverse proxy HTTP biasa menggunakan `getaddrinfo` dan `poll()` dalam handler, membuffer response dalam memori, dan belum ada streaming, advanced load balancing, active health check scheduler, atau upstream connection pooling. WebSocket proxy data path sudah didaftarkan dalam worker `epoll`, tetapi connect/DNS/handshake upstream masih dibuat sebelum tunnel bermula. Circuit breaker semasa pasif, in-memory per process, dan tidak distributed.
@@ -475,6 +480,14 @@ curl -i http://127.0.0.1:18080/
 ```
 
 Manual HTTP/2 smoke uses temporary SQLite databases with `http2_enabled=true`: h2c raw socket clients send HTTP/2 preface, SETTINGS, HEADERS, and optional DATA frames; TLS smoke negotiates ALPN `h2` with a Python SSL client and sends the same HTTP/2 frame sequence. See `docs/plans/018-http2-h2c-request-serving.md` and `docs/plans/019-http2-tls-alpn-h2.md` for validated scenarios.
+
+Automated TLS ALPN `h2` real-client smoke:
+
+```bash
+ctest --test-dir build --output-on-failure -R rimau_tls_alpn_h2_curl
+```
+
+This test runs `curl --http2` when curl reports HTTP2 support. It currently proves ALPN `h2` negotiation with a real client, not full HTTP/2 request success.
 
 Documentation check:
 

@@ -407,6 +407,16 @@ if(RIMAU_ENABLE_TESTS)
             "${CMAKE_SOURCE_DIR}/tests/test_http1_network.py"
             "$<TARGET_FILE:rimau-server>"
             "${CMAKE_BINARY_DIR}/test-runtime")
+    add_test(
+        NAME rimau_tls_alpn_h2_curl
+        COMMAND
+            "${RIMAU_PYTHON3_EXECUTABLE}"
+            "${CMAKE_SOURCE_DIR}/tests/test_tls_alpn_h2_curl.py"
+            "$<TARGET_FILE:rimau-server>"
+            "${CMAKE_BINARY_DIR}/test-runtime"
+            "${RIMAU_OPENSSL_INSTALL_DIR}/bin/openssl")
+    set_tests_properties(rimau_tls_alpn_h2_curl PROPERTIES
+        SKIP_REGULAR_EXPRESSION "SKIP:")
 endif()
 
 install(TARGETS rimau-server RUNTIME DESTINATION bin)

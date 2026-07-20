@@ -280,6 +280,7 @@ add_library(rimau_core
     src/http/static_file_handler.cpp
     src/http/transaction.cpp
     src/http/virtual_host.cpp
+    src/http/waf.cpp
     src/protocol/http2_frame.cpp
     src/protocol/http2_gateway.cpp
     src/protocol/http2_hpack.cpp
@@ -364,6 +365,10 @@ if(RIMAU_ENABLE_TESTS)
         tests/test_virtual_host.cpp)
     target_link_libraries(rimau-virtual-host-tests PRIVATE rimau_core)
 
+    add_executable(rimau-waf-tests
+        tests/test_waf.cpp)
+    target_link_libraries(rimau-waf-tests PRIVATE rimau_core)
+
     add_test(NAME rimau_http_parser COMMAND rimau-http-parser-tests)
     add_test(NAME rimau_handler_pipeline COMMAND rimau-handler-pipeline-tests)
     add_test(NAME rimau_http_response COMMAND rimau-http-response-tests)
@@ -372,6 +377,7 @@ if(RIMAU_ENABLE_TESTS)
     add_test(NAME rimau_http2_wire COMMAND rimau-http2-wire-tests)
     add_test(NAME rimau_http3_wire COMMAND rimau-http3-wire-tests)
     add_test(NAME rimau_virtual_host COMMAND rimau-virtual-host-tests)
+    add_test(NAME rimau_waf COMMAND rimau-waf-tests)
 endif()
 
 install(TARGETS rimau-server RUNTIME DESTINATION bin)

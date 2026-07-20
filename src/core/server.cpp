@@ -7,6 +7,7 @@
 #include "rimau/http/static_file_handler.hpp"
 #include "rimau/http/transaction.hpp"
 #include "rimau/http/virtual_host.hpp"
+#include "rimau/http/waf.hpp"
 #include "rimau/protocol/http2_frame.hpp"
 #include "rimau/protocol/http2_gateway.hpp"
 #include "rimau/protocol/http2_hpack.hpp"
@@ -2642,9 +2643,18 @@ private:
         if (is_websocket_upgrade_request(*header_parse.request)) {
             request_buffer_.erase(0, body_start);
             request_started_at_ = request_buffer_.empty() ? std::chrono::steady_clock::time_point {} : std::chrono::steady_clock::now();
+            if (security_state_ && !security_state_->allow_request(client_ip_, *config_)) {
+                set_response(rimau::http::text_response(429, "Too Many Requests\n"), rimau::http::BodyMode::include, false);
+                return;
+            }
+            if (auto waf_response = inspect_waf(*header_parse.request)) {
+                set_response(std::move(*waf_response), rimau::http::BodyMode::include, false);
+                return;
+            }
             if (try_start_websocket_proxy(*header_parse.request)) {
                 return;
             }
+            ++requests_served_;
             set_websocket_handshake_response(websocket_handshake_response(*header_parse.request));
             return;
         }
@@ -3078,6 +3088,13 @@ private:
             return;
         }
 
+        if (auto waf_response = inspect_waf(*built.request)) {
+            set_serialized_response(
+                serialize_http2_response(stream_id, *waf_response, rimau::http::BodyMode::include, *config_),
+                true);
+            return;
+        }
+
         ++requests_served_;
 
         rimau::http::VirtualHostHandlerFactory handler_factory(
@@ -3121,6 +3138,43 @@ private:
         settings.circuit_breaker_failure_threshold = config_->reverse_proxy_circuit_breaker_failure_threshold;
         settings.circuit_breaker_cooldown_seconds = config_->reverse_proxy_circuit_breaker_cooldown_seconds;
         return settings;
+    }
+
+    rimau::http::WafSettings waf_settings() const
+    {
+        rimau::http::WafSettings settings;
+        settings.enabled = config_->modsecurity_enabled;
+        settings.owasp_crs_enabled = config_->modsecurity_owasp_crs_enabled;
+        settings.blocking_enabled = config_->modsecurity_blocking_enabled;
+        settings.anomaly_threshold = config_->modsecurity_anomaly_threshold;
+        settings.max_inspection_bytes = config_->modsecurity_max_inspection_bytes;
+        return settings;
+    }
+
+    std::optional<rimau::http::Response> inspect_waf(const rimau::http::Request& request) const
+    {
+        const auto result = rimau::http::inspect_request(request, waf_settings());
+        if (!result.inspected || result.matches.empty()) {
+            return std::nullopt;
+        }
+
+        if (config_->modsecurity_audit_log_enabled) {
+            const auto& match = result.matches.front();
+            log(
+                LogLevel::warning,
+                "worker " + std::to_string(worker_id_) + " waf "
+                    + (result.allowed ? "matched " : "blocked ")
+                    + request.method + " " + request.target
+                    + " rule=" + std::to_string(match.rule_id)
+                    + " score=" + std::to_string(result.anomaly_score)
+                    + " variable=" + match.variable);
+        }
+
+        if (!result.allowed) {
+            return rimau::http::waf_block_response(result);
+        }
+
+        return std::nullopt;
     }
 
     std::size_t websocket_proxy_buffer_limit() const
@@ -3184,12 +3238,6 @@ private:
 
         if (!upstreams) {
             return false;
-        }
-
-        if (security_state_ && !security_state_->allow_request(client_ip_, *config_)) {
-            request_buffer_.clear();
-            set_response(rimau::http::text_response(429, "Too Many Requests\n"), rimau::http::BodyMode::include, false);
-            return true;
         }
 
         ++requests_served_;
@@ -3268,6 +3316,11 @@ private:
 
         if (security_state_ && !security_state_->allow_request(client_ip_, *config_)) {
             set_response(rimau::http::text_response(429, "Too Many Requests\n"), rimau::http::BodyMode::include, false);
+            return;
+        }
+
+        if (auto waf_response = inspect_waf(*parsed.request)) {
+            set_response(std::move(*waf_response), rimau::http::BodyMode::include, false);
             return;
         }
 

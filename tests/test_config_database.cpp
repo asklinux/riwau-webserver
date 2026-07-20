@@ -80,6 +80,12 @@ int main()
         assert(config.reverse_proxy_circuit_breaker_enabled);
         assert(config.reverse_proxy_circuit_breaker_failure_threshold == 3);
         assert(config.reverse_proxy_circuit_breaker_cooldown_seconds == 10);
+        assert(!config.modsecurity_enabled);
+        assert(config.modsecurity_owasp_crs_enabled);
+        assert(config.modsecurity_blocking_enabled);
+        assert(config.modsecurity_anomaly_threshold == 5);
+        assert(config.modsecurity_max_inspection_bytes == 131072);
+        assert(config.modsecurity_audit_log_enabled);
     }
 
     rimau::core::set_config_value(database_path, "host", "127.0.0.1");
@@ -143,6 +149,12 @@ int main()
     rimau::core::set_config_value(database_path, "reverse_proxy_circuit_breaker_enabled", "true");
     rimau::core::set_config_value(database_path, "reverse_proxy_circuit_breaker_failure_threshold", "2");
     rimau::core::set_config_value(database_path, "reverse_proxy_circuit_breaker_cooldown_seconds", "7");
+    rimau::core::set_config_value(database_path, "modsecurity_enabled", "true");
+    rimau::core::set_config_value(database_path, "modsecurity_owasp_crs_enabled", "true");
+    rimau::core::set_config_value(database_path, "modsecurity_blocking_enabled", "false");
+    rimau::core::set_config_value(database_path, "modsecurity_anomaly_threshold", "7");
+    rimau::core::set_config_value(database_path, "modsecurity_max_inspection_bytes", "65536");
+    rimau::core::set_config_value(database_path, "modsecurity_audit_log_enabled", "false");
 
     {
         const auto config = rimau::core::load_config_from_database(database_path);
@@ -207,6 +219,12 @@ int main()
         assert(config.reverse_proxy_circuit_breaker_enabled);
         assert(config.reverse_proxy_circuit_breaker_failure_threshold == 2);
         assert(config.reverse_proxy_circuit_breaker_cooldown_seconds == 7);
+        assert(config.modsecurity_enabled);
+        assert(config.modsecurity_owasp_crs_enabled);
+        assert(!config.modsecurity_blocking_enabled);
+        assert(config.modsecurity_anomaly_threshold == 7);
+        assert(config.modsecurity_max_inspection_bytes == 65536);
+        assert(!config.modsecurity_audit_log_enabled);
     }
 
     bool unknown_key_failed = false;
@@ -410,6 +428,22 @@ int main()
         invalid_proxy_circuit_cooldown_failed = true;
     }
     assert(invalid_proxy_circuit_cooldown_failed);
+
+    bool invalid_modsecurity_bool_failed = false;
+    try {
+        rimau::core::set_config_value(database_path, "modsecurity_enabled", "maybe");
+    } catch (const std::runtime_error&) {
+        invalid_modsecurity_bool_failed = true;
+    }
+    assert(invalid_modsecurity_bool_failed);
+
+    bool invalid_modsecurity_threshold_failed = false;
+    try {
+        rimau::core::set_config_value(database_path, "modsecurity_anomaly_threshold", "0");
+    } catch (const std::runtime_error&) {
+        invalid_modsecurity_threshold_failed = true;
+    }
+    assert(invalid_modsecurity_threshold_failed);
 
     std::filesystem::remove(database_path);
     return 0;

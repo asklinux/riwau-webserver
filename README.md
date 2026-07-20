@@ -2,7 +2,7 @@
 
 Rimau Web Server ialah projek C++ untuk membina web server berprestasi tinggi dengan sasaran jangka panjang setanding kelas OpenLiteSpeed dan nginx.
 
-Status semasa: scaffold awal yang sudah mempunyai HTTP/1.1 praktikal. HTTP/1.1 menyokong GET/HEAD static serving, OPTIONS, POST/PUT/PATCH/DELETE JSON scaffold, Content-Length, chunked request decoding, keep-alive, basic pipelining, single-range responses, gzip static compression, basic WebSocket echo, WebSocket reverse proxy tunneling untuk proxy vhost, TLS hardening asas, timeout, rate limit, kawalan connection/IP, virtual host static, dan reverse proxy baseline dengan HTTP/HTTPS upstream, multi-upstream round-robin asas, retry/failover asas, dan passive circuit breaker. HTTP/2 kini partial: frame codec, SETTINGS/PING, HPACK asas tanpa Huffman, decode literal incremental indexing tanpa dynamic-table persistence, cleartext h2c prior-knowledge request serving, dan TLS ALPN `h2` request serving asas melalui shared handler pipeline sudah ada. Flow control penuh, continuation assembly, dan production-grade stream/session behavior belum siap. HTTP/3 kini partial pada codec primitive: QUIC varint, frame, dan SETTINGS payload parser/serializer sudah ada, tetapi UDP/QUIC/QPACK/live request serving belum siap.
+Status semasa: scaffold awal yang sudah mempunyai HTTP/1.1 praktikal. HTTP/1.1 menyokong GET/HEAD static serving, OPTIONS, POST/PUT/PATCH/DELETE JSON scaffold, Content-Length, chunked request decoding, keep-alive, basic pipelining, single-range responses, gzip static compression, basic WebSocket echo, WebSocket reverse proxy tunneling untuk proxy vhost, TLS hardening asas, timeout, rate limit, kawalan connection/IP, built-in ModSecurity-compatible WAF subset, virtual host static, dan reverse proxy baseline dengan HTTP/HTTPS upstream, multi-upstream round-robin asas, retry/failover asas, dan passive circuit breaker. HTTP/2 kini partial: frame codec, SETTINGS/PING, HPACK asas tanpa Huffman, decode literal incremental indexing tanpa dynamic-table persistence, cleartext h2c prior-knowledge request serving, dan TLS ALPN `h2` request serving asas melalui shared handler pipeline sudah ada. Flow control penuh, continuation assembly, dan production-grade stream/session behavior belum siap. HTTP/3 kini partial pada codec primitive: QUIC varint, frame, dan SETTINGS payload parser/serializer sudah ada, tetapi UDP/QUIC/QPACK/live request serving belum siap.
 
 Seni bina request pipeline mengambil inspirasi konsep daripada Proxygen, tetapi kod Proxygen tidak disalin ke projek ini.
 
@@ -28,7 +28,8 @@ Pada Linux x86_64 dengan GNU/Clang, CMake membina GNU glibc 2.43 daripada source
 - WebSocket semasa ialah basic RFC 6455 echo untuk host bukan proxy, dan reverse proxy tunnel untuk proxy vhost HTTP/HTTPS upstream. Tiada fragmentation handling penuh, extensions, subprotocol routing tempatan, atau application routing.
 - Request body dan static file response masih dibuffer dalam memori; streaming body dan zero-copy static file path belum implemented.
 - Request smuggling checks menolak invalid/duplicate `Content-Length`, konflik `Content-Length`/`Transfer-Encoding`, duplicate/unsupported `Transfer-Encoding`, obs-fold, dan bare CR/LF.
-- Security controls termasuk request/header/body/idle timeout, global/per-IP connection limit, fixed-window per-IP rate limit, IPv4/IPv6 exact/CIDR allowlist/blocklist, SQLite-configurable security header values, dan `server_header_enabled=false`.
+- Security controls termasuk request/header/body/idle timeout, global/per-IP connection limit, fixed-window per-IP rate limit, built-in ModSecurity-compatible WAF subset, IPv4/IPv6 exact/CIDR allowlist/blocklist, SQLite-configurable security header values, dan `server_header_enabled=false`.
+- WAF semasa ialah subset OWASP CRS-inspired yang dikompil dalam kod Rimau untuk scanner user-agent, request splitting/CRLF, path traversal, XSS, SQLi, RCE, PHP wrapper injection, dan Java/JNDI exploit patterns. Ini bukan full `libmodsecurity` dan bukan full OWASP Core Rule Set.
 - Virtual host memilih handler melalui HTTP `Host` header dengan exact host dan wildcard ringkas `*.domain`.
 - Reverse proxy semasa menyokong upstream `http://` dan `https://`, membaca response HTTP biasa secara buffered, WebSocket proxy tunnel dua hala, dan mempunyai multi-upstream round-robin asas, retry/failover asas, serta passive circuit breaker. Ia belum mempunyai certificate verification policy production-ready, active health check scheduler, streaming request/response HTTP biasa, atau connection pooling.
 - Route server-side script boleh dideklarasi seperti `app.test=script:php:public/app`, tetapi runtime PHP/Python/Perl belum dibundle dan belum dieksekusi. Handler semasa pulang `501 Not Implemented` dengan `x-rimau-runtime-status: planned`.
@@ -160,6 +161,12 @@ Contoh ubah config:
 ./build/rimau-server --database data/rimau.sqlite3 --set reverse_proxy_circuit_breaker_enabled=true
 ./build/rimau-server --database data/rimau.sqlite3 --set reverse_proxy_circuit_breaker_failure_threshold=3
 ./build/rimau-server --database data/rimau.sqlite3 --set reverse_proxy_circuit_breaker_cooldown_seconds=10
+./build/rimau-server --database data/rimau.sqlite3 --set modsecurity_enabled=true
+./build/rimau-server --database data/rimau.sqlite3 --set modsecurity_owasp_crs_enabled=true
+./build/rimau-server --database data/rimau.sqlite3 --set modsecurity_blocking_enabled=true
+./build/rimau-server --database data/rimau.sqlite3 --set modsecurity_anomaly_threshold=5
+./build/rimau-server --database data/rimau.sqlite3 --set modsecurity_max_inspection_bytes=131072
+./build/rimau-server --database data/rimau.sqlite3 --set modsecurity_audit_log_enabled=true
 ./build/rimau-server --database data/rimau.sqlite3 --check-config
 ./build/rimau-server --database data/rimau.sqlite3 --protocols
 ```

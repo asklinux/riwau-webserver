@@ -4,7 +4,7 @@
 
 Rimau Web Server disusun sebagai web server C++ modular. Matlamat jangka panjang ialah menyokong HTTP/1.1, HTTP/2, dan HTTP/3 dengan architecture yang boleh berkembang ke arah event-driven, TLS/ALPN, reverse proxy, static serving, caching, observability, dan plugin.
 
-Status semasa ialah scaffold awal yang sudah mempunyai HTTP/1.1 praktikal, HTTPS/TLS hardening asas, kawalan keselamatan runtime asas, SQLite virtual host routing, baseline reverse proxy dengan HTTP/HTTPS upstream, multi-upstream round-robin asas, retry/failover asas, WebSocket reverse proxy tunneling, passive circuit breaker, HTTP/2 wire codec partial, partial cleartext h2c dan TLS ALPN `h2` request serving, dan HTTP/3 wire codec primitives. HTTP/2 production session behavior dan HTTP/3 live request serving masih belum lengkap.
+Status semasa ialah scaffold awal yang sudah mempunyai HTTP/1.1 praktikal, HTTPS/TLS hardening asas, kawalan keselamatan runtime asas, built-in ModSecurity-compatible WAF dengan subset OWASP CRS-inspired rules, SQLite virtual host routing, baseline reverse proxy dengan HTTP/HTTPS upstream, multi-upstream round-robin asas, retry/failover asas, WebSocket reverse proxy tunneling, passive circuit breaker, HTTP/2 wire codec partial, partial cleartext h2c dan TLS ALPN `h2` request serving, dan HTTP/3 wire codec primitives. HTTP/2 production session behavior, HTTP/3 live request serving, full `libmodsecurity`, dan full OWASP Core Rule Set masih belum lengkap.
 
 Pada 2026-07-18, Rimau mula mengadaptasi konsep daripada Proxygen (`https://github.com/facebook/proxygen`) secara seni bina, bukan salinan kod. Konsep yang diambil ialah pemisahan connection/session, transaction, request handler, request handler factory, dan downstream response writer.
 
@@ -33,6 +33,7 @@ main()
   -> if WebSocket Upgrade matches proxy vhost: connect upstream, validate upstream 101, then tunnel client/upstream via same worker epoll reactor
   -> if WebSocket Upgrade does not match proxy vhost: local basic WebSocket echo state
   -> enforce per-IP request rate limit
+  -> if modsecurity_enabled=true: inspect request with built-in ModSecurity-compatible OWASP CRS-inspired WAF subset
   -> Transaction
   -> VirtualHostHandlerFactory
   -> select static, reverse proxy, script-placeholder, or fallback static handler
@@ -88,6 +89,7 @@ Responsibility:
 - Host-based virtual host routing
 - Baseline HTTP reverse proxy
 - Server-side runtime declaration placeholder that returns explicit `501`
+- Built-in ModSecurity-compatible WAF inspection with OWASP CRS-inspired rule subset
 - Request handler pipeline
 - Transaction dispatch abstraction
 - Protocol-independent response sink abstraction
@@ -100,6 +102,7 @@ Important files:
 - `src/http/static_file_handler.cpp`
 - `src/http/transaction.cpp`
 - `src/http/virtual_host.cpp`
+- `src/http/waf.cpp`
 
 ### Protocol
 
@@ -209,6 +212,12 @@ Supported keys:
 - `reverse_proxy_circuit_breaker_enabled`
 - `reverse_proxy_circuit_breaker_failure_threshold`
 - `reverse_proxy_circuit_breaker_cooldown_seconds`
+- `modsecurity_enabled`
+- `modsecurity_owasp_crs_enabled`
+- `modsecurity_blocking_enabled`
+- `modsecurity_anomaly_threshold`
+- `modsecurity_max_inspection_bytes`
+- `modsecurity_audit_log_enabled`
 
 The server bootstraps this table and default rows when the SQLite database is missing. Runtime configuration is read from SQLite, not a key-value config file.
 
@@ -379,6 +388,12 @@ Supported keys:
 - `reverse_proxy_circuit_breaker_enabled`
 - `reverse_proxy_circuit_breaker_failure_threshold`
 - `reverse_proxy_circuit_breaker_cooldown_seconds`
+- `modsecurity_enabled`
+- `modsecurity_owasp_crs_enabled`
+- `modsecurity_blocking_enabled`
+- `modsecurity_anomaly_threshold`
+- `modsecurity_max_inspection_bytes`
+- `modsecurity_audit_log_enabled`
 
 Default database:
 
@@ -429,6 +444,12 @@ Examples:
 ./build/rimau-server --database data/rimau.sqlite3 --set reverse_proxy_circuit_breaker_enabled=true
 ./build/rimau-server --database data/rimau.sqlite3 --set reverse_proxy_circuit_breaker_failure_threshold=3
 ./build/rimau-server --database data/rimau.sqlite3 --set reverse_proxy_circuit_breaker_cooldown_seconds=10
+./build/rimau-server --database data/rimau.sqlite3 --set modsecurity_enabled=true
+./build/rimau-server --database data/rimau.sqlite3 --set modsecurity_owasp_crs_enabled=true
+./build/rimau-server --database data/rimau.sqlite3 --set modsecurity_blocking_enabled=true
+./build/rimau-server --database data/rimau.sqlite3 --set modsecurity_anomaly_threshold=5
+./build/rimau-server --database data/rimau.sqlite3 --set modsecurity_max_inspection_bytes=131072
+./build/rimau-server --database data/rimau.sqlite3 --set modsecurity_audit_log_enabled=true
 ./build/rimau-server --database data/rimau.sqlite3 --check-config
 ./build/rimau-server --database data/rimau.sqlite3
 ```
@@ -447,7 +468,7 @@ The default `tls_certificate_file` and `tls_private_key_file` remain the fallbac
 host=static:document-root;host=proxy:http://upstream:port/base,https://backup:port/base;host=script:runtime:script-root
 ```
 
-SIGHUP reloads SQLite config values that can safely change without recreating listener sockets or worker threads. Dynamic values include `document_root`, `max_request_bytes`, HTTP keep-alive settings, TCP keepalive settings for newly accepted sockets, protocol status flags, graceful shutdown timeout, request/header/body/idle timeout, rate-limit settings, IPv4/IPv6 IP allow/block lists, security header behavior/values, virtual host and reverse proxy settings, and TLS certificate/key/SNI/TLS settings for new TLS connections. Changes to bind address, port, listener backlog, worker count, epoll batch size, `SO_REUSEPORT`, connection pool sizing, HTTP/1 enablement, or `tls_enabled` require restart.
+SIGHUP reloads SQLite config values that can safely change without recreating listener sockets or worker threads. Dynamic values include `document_root`, `max_request_bytes`, HTTP keep-alive settings, TCP keepalive settings for newly accepted sockets, protocol status flags, graceful shutdown timeout, request/header/body/idle timeout, rate-limit settings, IPv4/IPv6 IP allow/block lists, security header behavior/values, virtual host and reverse proxy settings, WAF settings, and TLS certificate/key/SNI/TLS settings for new TLS connections. Changes to bind address, port, listener backlog, worker count, epoll batch size, `SO_REUSEPORT`, connection pool sizing, HTTP/1 enablement, or `tls_enabled` require restart.
 
 Production config ownership, backup, and migration behavior are not final. Needs verification.
 
@@ -485,6 +506,7 @@ Linux epoll reactor worker
   -> ClientConnection state machine
   -> optional non-blocking TLS handshake/read/write
   -> parse raw HTTP/1.1 bytes into Request
+  -> built-in WAF inspection when enabled
   -> create Transaction
   -> VirtualHostHandlerFactory selects static, reverse proxy, script-placeholder, or fallback static handler
   -> handler sends Response through buffered ResponseSink
@@ -497,6 +519,7 @@ Future target:
 HTTP/1.1 codec/session
 HTTP/2 codec/session
 HTTP/3 codec/session
+  -> shared WAF inspection when enabled
   -> shared Transaction
   -> shared RequestHandler pipeline
   -> protocol-specific ResponseSink
@@ -684,6 +707,7 @@ Implemented:
 - Header injection and response splitting mitigation.
 - SQLite-configurable default security headers and configurable `Server` header.
 - WebSocket frame size limit.
+- Built-in ModSecurity-compatible WAF can block requests by anomaly threshold before HTTP handler dispatch. Current built-in rules cover scanner user agents, encoded CRLF/request splitting, path traversal, XSS, SQLi, RCE, PHP wrapper injection, and Java/JNDI exploit patterns.
 - Reverse proxy upstream response size limit.
 - Reverse proxy HTTPS upstream transport through bundled OpenSSL.
 - WebSocket proxy upstream handshake validation and sanitized `101 Switching Protocols` response serialization.
@@ -699,6 +723,8 @@ Missing:
 - Privilege dropping.
 - Full parser hardening and fuzzing.
 - Fuzz testing.
+- Full `libmodsecurity` transaction engine integration and full OWASP Core Rule Set bundle. Needs verification.
+- WAF rule tuning, per-virtual-host WAF overrides, structured audit log persistence, and ModSecurity rule syntax parsing.
 - Advanced slow-client scoring.
 - Safe default production file permissions.
 - Reverse proxy request/response policy hardening beyond current hop-by-hop header stripping, buffered-size limit, WebSocket proxy handshake validation, passive circuit breaker, basic retry, and TLS transport.

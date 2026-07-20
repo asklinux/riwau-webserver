@@ -10,7 +10,7 @@ Rimau Web Server ialah projek untuk membina web server menggunakan C++ dengan sa
 - Menyokong HTTP/1.1, HTTP/2, dan HTTP/3.
 - Menyediakan struktur modular supaya transport, parser, scheduler, logging, config, static file, TLS, dan plugin boleh dibangunkan secara berperingkat.
 
-Status semasa bukan web server production-ready. Scaffold awal sudah diwujudkan dengan HTTP/1.1 praktikal untuk static serving, body framing asas, keep-alive, pipelining asas, range, gzip, WebSocket echo asas, WebSocket reverse proxy tunneling untuk proxy vhost, TLS hardening asas termasuk multi-certificate SNI, kawalan keselamatan asas, virtual host static, baseline HTTP reverse proxy dengan passive circuit breaker, HTTP/2 wire codec partial, cleartext h2c dan TLS ALPN `h2` request serving asas, dan HTTP/3 wire codec primitives.
+Status semasa bukan web server production-ready. Scaffold awal sudah diwujudkan dengan HTTP/1.1 praktikal untuk static serving, body framing asas, keep-alive, pipelining asas, range, gzip, WebSocket echo asas, WebSocket reverse proxy tunneling untuk proxy vhost, TLS hardening asas termasuk multi-certificate SNI, kawalan keselamatan asas, WAF terbina dalam yang ModSecurity-compatible dengan subset rules OWASP CRS-inspired, virtual host static, baseline HTTP reverse proxy dengan passive circuit breaker, HTTP/2 wire codec partial, cleartext h2c dan TLS ALPN `h2` request serving asas, dan HTTP/3 wire codec primitives.
 
 Pada 2026-07-18, projek ini mula mengadaptasi konsep seni bina daripada Proxygen (`https://github.com/facebook/proxygen`) secara konseptual sahaja. Kod Proxygen tidak disalin ke repo ini.
 
@@ -45,6 +45,7 @@ Implemented:
 - Bundled GNU glibc 2.43 source build untuk Linux x86_64 static sysroot
 - Fully static `rimau-server` link pada Linux x86_64 GNU/Clang melalui bundled glibc sysroot apabila `RIMAU_FULLY_STATIC_SERVER=ON` dan `RIMAU_USE_BUNDLED_GLIBC=ON`
 - In-memory per-process security state untuk global/per-IP connection limit dan fixed-window rate limiting
+- Built-in ModSecurity-compatible WAF dengan subset OWASP CRS-inspired rules untuk scanner user-agent, request splitting/CRLF, path traversal, XSS, SQLi, RCE, PHP wrapper injection, dan Java/JNDI exploit patterns
 - IPv4/IPv6 exact/CIDR IP allowlist dan blocklist
 - SQLite-configurable HTTP security header values
 - SQLite-configured virtual host routing melalui HTTP `Host` header dengan exact host dan wildcard ringkas `*.domain`
@@ -108,6 +109,7 @@ Not present:
 |       |-- 017-http2-http3-wire-codecs.md
 |       |-- 018-http2-h2c-request-serving.md
 |       |-- 019-http2-tls-alpn-h2.md
+|       |-- 020-modsecurity-owasp-crs-built-in-waf.md
 |       `-- README.md
 |-- include/
 |   `-- rimau/
@@ -134,7 +136,8 @@ Not present:
     |-- test_http3_wire.cpp
     |-- test_http_response.cpp
     |-- test_protocol_capabilities.cpp
-    `-- test_virtual_host.cpp
+    |-- test_virtual_host.cpp
+    `-- test_waf.cpp
 ```
 
 ## Main Modules
@@ -156,6 +159,8 @@ Not present:
 - `rimau::http::parse_virtual_host_rules`: Parser config virtual host `host=static:path`, `host=proxy:http://upstream,https://backup`, dan `host=script:runtime:path`.
 - `rimau::http::ReverseProxyHandler` dalam `src/http/virtual_host.cpp`: Baseline buffered reverse proxy untuk upstream `http://` dan `https://`, multi-upstream round-robin asas, dan retry/failover asas.
 - `rimau::http::reverse_proxy_upstream_available` dan rekod success/failure dalam `src/http/virtual_host.cpp`: Passive circuit breaker in-memory untuk upstream reverse proxy.
+- `rimau::http::inspect_request` dalam `src/http/waf.cpp`: WAF terbina dalam yang memeriksa request HTTP terhadap subset rules ModSecurity/OWASP CRS-inspired dan menghasilkan anomaly score.
+- `rimau::http::waf_block_response` dalam `src/http/waf.cpp`: Response `403 Forbidden` apabila WAF blocking mode aktif dan score mencapai threshold.
 - `rimau::core::ClientConnection` dalam `src/core/server.cpp`: State machine non-blocking untuk HTTP/1.1, partial cleartext h2c dan TLS ALPN `h2` HTTP/2 request serving, optional TLS, WebSocket echo tempatan, dan WebSocket reverse proxy tunnel untuk proxy vhost.
 - `rimau::http::ServerSideScriptHandler` dalam `src/http/virtual_host.cpp`: Placeholder explicit `501 Not Implemented` untuk runtime seperti `php`, `python`, dan `perl`.
 - `rimau::core::Worker` dalam `src/core/server.cpp`: Per-worker listener, `epoll` fd, active connection map, dan connection pool.
@@ -215,6 +220,12 @@ Configure virtual hosts:
 ./build/rimau-server --database data/rimau.sqlite3 --set reverse_proxy_circuit_breaker_enabled=true
 ./build/rimau-server --database data/rimau.sqlite3 --set reverse_proxy_circuit_breaker_failure_threshold=3
 ./build/rimau-server --database data/rimau.sqlite3 --set reverse_proxy_circuit_breaker_cooldown_seconds=10
+./build/rimau-server --database data/rimau.sqlite3 --set modsecurity_enabled=true
+./build/rimau-server --database data/rimau.sqlite3 --set modsecurity_owasp_crs_enabled=true
+./build/rimau-server --database data/rimau.sqlite3 --set modsecurity_blocking_enabled=true
+./build/rimau-server --database data/rimau.sqlite3 --set modsecurity_anomaly_threshold=5
+./build/rimau-server --database data/rimau.sqlite3 --set modsecurity_max_inspection_bytes=131072
+./build/rimau-server --database data/rimau.sqlite3 --set modsecurity_audit_log_enabled=true
 ```
 
 Check bundled OpenSSL:
@@ -343,6 +354,7 @@ Production deployment, service manager, packaging, container, TLS certificate ha
 - Baseline reverse proxy virtual host untuk upstream HTTP dan HTTPS.
 - Multi-upstream reverse proxy dengan round-robin asas dan retry/failover asas.
 - Passive reverse proxy circuit breaker in-memory per process dengan threshold/cooldown SQLite.
+- Built-in ModSecurity-compatible WAF untuk HTTP/1.1, WebSocket upgrade, WebSocket proxy upgrade, dan partial HTTP/2 request path. Rule set semasa ialah subset OWASP CRS-inspired yang dikompil dalam kod Rimau, bukan full `libmodsecurity` atau full OWASP CRS.
 - Script virtual host declaration dengan runtime name seperti `php`, `python`, atau `perl`; execution belum implemented dan response semasa ialah `501`.
 - HTTP/1.1 keep-alive.
 - SIGHUP reload untuk dynamic SQLite config seperti `document_root`, `max_request_bytes`, HTTP keep-alive settings, timeout, security limit, IP list, dan TLS certificate/key/TLS settings untuk sambungan baharu; listener dan worker changes masih memerlukan restart.
@@ -368,6 +380,7 @@ Production deployment, service manager, packaging, container, TLS certificate ha
 - Event loop performance architecture: Partial with Linux `epoll` backend.
 - Virtual hosts: Partial; exact host, simple wildcard, static document root, proxy route, and script declaration are implemented.
 - Reverse proxy: Partial; HTTP/HTTPS upstream, buffered response untuk HTTP biasa, WebSocket tunnel untuk proxy vhost, round-robin asas, retry/failover asas, dan passive circuit breaker are implemented.
+- WAF/ModSecurity: Partial; SQLite-configurable built-in ModSecurity-compatible WAF with OWASP CRS-inspired subset rules is implemented. Full `libmodsecurity` integration and full OWASP Core Rule Set bundle remain planned. Needs verification.
 - Server-side language runtimes: Planned; declarations exist but PHP/Python/Perl execution is not implemented.
 - Access log format: Partial through stderr logger only.
 - Config reload: Partial for restart-free dynamic SQLite values.
@@ -396,6 +409,7 @@ Production deployment, service manager, packaging, container, TLS certificate ha
 - TLS request serving implemented untuk HTTP/1.1 dan partial HTTP/2 ALPN `h2`; ALPN `h3` belum diiklankan kerana HTTP/3 live request serving belum implemented.
 - TLS certificate/key reload hanya untuk sambungan baharu; sambungan TLS sedia ada terus menggunakan context lama.
 - Rate limiting dan connection counters adalah in-memory per process, bukan distributed.
+- WAF semasa ialah signature/anomaly engine ringkas terbina dalam. Ia bukan full ModSecurity transaction engine, tidak membaca syntax rule ModSecurity sebenar, tidak bundle full OWASP Core Rule Set, tiada phase engine lengkap, tiada persistent audit log berstruktur, dan rule tuning/exception per virtual host belum implemented. Full ModSecurity/libmodsecurity + OWASP CRS integration remains Needs verification.
 - Security header names masih fixed set; nilainya boleh dikonfigurasi atau dikosongkan melalui SQLite.
 - SIGHUP reload tidak menukar listener bind, worker count, HTTP/1 enablement, TLS enabled mode, atau connection pool sizing; ubah nilai tersebut memerlukan restart.
 - Dev certificate self-signed tidak sesuai untuk production.
@@ -417,6 +431,7 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ./build/rimau-http2-wire-tests
 ./build/rimau-http3-wire-tests
+./build/rimau-waf-tests
 ./build/rimau-server --protocols
 ./build/rimau-server --database data/rimau.sqlite3 --protocols
 ldd build/rimau-server || true

@@ -669,3 +669,31 @@ The project already had partial HTTP/2 request serving for h2c. Routing TLS ALPN
 Consequence:
 
 HTTP/2 over TLS is now usable for basic non-Huffman HEADERS/DATA request/response smoke tests, but it is not production-complete. HPACK Huffman, dynamic table persistence, CONTINUATION assembly, production stream lifecycle, broad multiplexing semantics, priority, and full flow control remain pending. Current TLS `h2` validation uses a Python stdlib SSL client with manually built HTTP/2 frames; automated real-client HTTP/2 tests are still needed. HTTP/3 remains wire-codec-only with no ALPN `h3`.
+
+## ADR-0026: Add Built-In ModSecurity-Compatible WAF Subset
+
+- Date: 2026-07-20
+- Status: Accepted
+
+Decision:
+
+Add a built-in WAF module that is ModSecurity-compatible at the request-inspection/anomaly-score concept level, using a small OWASP CRS-inspired rule subset compiled into Rimau source. Do not vendor or claim full `libmodsecurity` or the full OWASP Core Rule Set in this phase.
+
+Implementation:
+
+- Add `rimau::http::WafSettings`, `WafResult`, `WafMatch`, `inspect_request`, and `waf_block_response`.
+- Add SQLite config keys `modsecurity_enabled`, `modsecurity_owasp_crs_enabled`, `modsecurity_blocking_enabled`, `modsecurity_anomaly_threshold`, `modsecurity_max_inspection_bytes`, and `modsecurity_audit_log_enabled`.
+- Default `modsecurity_enabled=false` to avoid unexpected blocking on existing installs.
+- Inspect HTTP/1.1 requests before `Transaction` dispatch.
+- Inspect WebSocket upgrade requests before local echo or reverse proxy tunnel setup.
+- Inspect partial HTTP/2 request objects before shared handler dispatch.
+- Block with `403 Forbidden` and `x-rimau-waf-*` headers when blocking mode is enabled and anomaly score reaches threshold.
+- Add CTest target `rimau_waf`.
+
+Reason:
+
+The project owner requested ModSecurity and OWASP rules to be built into the system. A complete `libmodsecurity` plus full OWASP CRS integration is a larger dependency, licensing, rule-update, parser, phase-engine, and performance project. The built-in subset gives immediate request protection without adding external runtime dependencies, while keeping the documentation honest about what is not yet implemented.
+
+Consequence:
+
+The current WAF is useful but partial. It does not parse ModSecurity rule syntax, does not implement the full ModSecurity transaction phase model, does not bundle the full OWASP Core Rule Set, does not provide per-virtual-host rule tuning, and does not persist structured audit logs. Full `libmodsecurity` and full OWASP CRS source bundling remain planned and need version/license/build validation before being claimed. Needs verification.

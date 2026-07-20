@@ -46,6 +46,7 @@ Implemented:
 - Static file symlink escape mitigation through canonical path checks.
 - Global and per-IP connection limits.
 - Per-IP fixed-window request rate limiting.
+- SQLite-configurable built-in ModSecurity-compatible WAF with OWASP CRS-inspired subset rules.
 - IPv4/IPv6 exact/CIDR allowlist and blocklist.
 - Configurable WebSocket max frame size.
 - SQLite-configurable default security header values and configurable `Server` header emission.
@@ -56,6 +57,7 @@ Implemented:
 - Reverse proxy retry/failover through SQLite `reverse_proxy_retry_count`.
 - Optional HTTPS upstream certificate verification through SQLite `reverse_proxy_tls_verify_upstream`.
 - Passive reverse proxy circuit breaker through SQLite threshold/cooldown keys.
+- WAF blocking for HTTP/1.1, WebSocket upgrade, WebSocket reverse proxy upgrade, and partial HTTP/2 request dispatch.
 - Script virtual host declarations such as `script:php:path`; execution returns explicit `501 Not Implemented`.
 - Linux `epoll` reactor per worker thread for the main server runtime.
 - Non-blocking listener and client socket I/O.
@@ -74,6 +76,7 @@ Implemented:
 - Partial HTTP/2 TLS ALPN `h2` request serving using the same preface, SETTINGS, HEADERS/DATA, shared handler pipeline, and HTTP/2 response serialization path.
 - HTTP/3 QUIC varint parser/serializer.
 - HTTP/3 frame parser/serializer and SETTINGS payload codec.
+- WAF unit test melalui CTest.
 - Basic HTTP request parser.
 - Basic HTTP response serializer.
 - Response serializer support for caller-controlled `Connection` headers.
@@ -99,6 +102,7 @@ Partial:
 - TLS is partial; production certificate lifecycle and OCSP are not implemented. HTTP/2 ALPN `h2` request serving exists only as a partial basic path, not production-complete HTTP/2.
 - Virtual hosts are partial; exact host, simple wildcard, static roots, proxy rules, and script declarations exist, but rewrite rules and richer routing are not implemented.
 - Reverse proxy is partial; HTTP/HTTPS upstream, optional default-trust-path certificate verification, buffered normal HTTP response, WebSocket tunnel data path through worker `epoll`, basic hop-by-hop header stripping, basic round-robin, retry/failover, and passive circuit breaker exist. Per-upstream HTTPS verification policy, normal HTTP proxy streaming, advanced load balancing, active health checks, and upstream connection pooling are not implemented.
+- ModSecurity/WAF is partial; a built-in ModSecurity-compatible anomaly-scoring WAF with OWASP CRS-inspired subset rules exists, but full `libmodsecurity` and full OWASP Core Rule Set are not bundled or implemented.
 - HTTP/2 and HTTP/3 support is partial: tested wire codec primitives exist, HTTP/2 has cleartext h2c and TLS ALPN `h2` request serving basics, and HTTP/3 remains wire-codec-only.
 - Server-side language support is planned only; PHP/Python/Perl runtime execution is not bundled or implemented.
 - Static glibc DNS/NSS hostname behavior for reverse proxy upstream hostnames still needs production validation because the static linker warns on `getaddrinfo` and OpenSSL `gethostbyname`. Needs verification.
@@ -137,8 +141,8 @@ Semasa pemeriksaan awal pada 2026-07-18:
 | Server-side runtimes | Planned | `script:runtime:path` config returns `501`; PHP/Python/Perl are not bundled or executed yet. |
 | Request pipeline | Partial | Handler/factory/transaction/response sink implemented for static, vhost, reverse proxy, and script-placeholder HTTP/1.1. |
 | Config | Partial | SQLite table `rimau_config`, including protocol, TLS, keep-alive, timeout, rate-limit, IP-list, security-header, virtual-host/proxy, and limited SIGHUP reload behavior. |
-| Security | Partial | Baseline HTTP framing hardening, timeout, rate limit, connection limit, configurable security header values, and IPv4/IPv6 IP allow/block list are implemented; fuzzing and production hardening remain pending. |
-| Tests | Partial | Parser, response serializer, handler pipeline, SQLite config, protocol capability, HTTP/2 wire, HTTP/3 wire, and virtual host tests. |
+| Security | Partial | Baseline HTTP framing hardening, timeout, rate limit, connection limit, built-in ModSecurity-compatible WAF subset, configurable security header values, and IPv4/IPv6 IP allow/block list are implemented; fuzzing, full ModSecurity/CRS integration, and production hardening remain pending. |
+| Tests | Partial | Parser, response serializer, handler pipeline, SQLite config, protocol capability, HTTP/2 wire, HTTP/3 wire, virtual host, and WAF tests. |
 | Deployment | Planned | No production deployment files. |
 | Database | Partial | SQLite is used for runtime configuration only; the SQLite engine is bundled static. |
 | I/O model | Partial | Linux `epoll` reactor with per-worker event loops and SO_REUSEPORT implemented; benchmarks still pending. |
@@ -1017,3 +1021,53 @@ Result:
 - `readelf` found no dynamic interpreter.
 - `make status` and `make status-https` reported no background server running.
 - `git status --short --branch` still fails because this directory is not a Git repository.
+
+ModSecurity-compatible WAF update:
+
+- Added `include/rimau/http/waf.hpp` and `src/http/waf.cpp`.
+- Added `rimau::http::WafSettings`, `WafMatch`, `WafResult`, `inspect_request`, and `waf_block_response`.
+- Added SQLite config keys `modsecurity_enabled`, `modsecurity_owasp_crs_enabled`, `modsecurity_blocking_enabled`, `modsecurity_anomaly_threshold`, `modsecurity_max_inspection_bytes`, and `modsecurity_audit_log_enabled`.
+- `modsecurity_enabled` defaults to `false`; all other WAF defaults are ready for blocking once enabled.
+- HTTP/1.1 normal requests are inspected before `Transaction` dispatch.
+- WebSocket upgrade requests are inspected before local echo or reverse proxy tunnel setup.
+- Partial HTTP/2 requests are inspected before shared handler dispatch.
+- WAF block responses return `403 Forbidden` with `x-rimau-waf-*` headers.
+- Added CTest target `rimau_waf`.
+- The WAF rules are compiled into Rimau and currently cover scanner user agents, encoded CRLF/request splitting, path traversal, XSS, SQLi, RCE, PHP wrapper injection, and Java/JNDI exploit patterns.
+
+Known limits from this update:
+
+- This is not full `libmodsecurity`.
+- This does not bundle the full OWASP Core Rule Set.
+- ModSecurity rule syntax parsing, full transaction phases, per-virtual-host WAF exceptions, structured persistent audit logs, and rule update tooling are not implemented. Needs verification.
+- WAF audit logging currently writes a concise stderr log line through the existing logger when enabled; it is not a ModSecurity audit log format.
+
+Validation on 2026-07-20 after ModSecurity-compatible WAF update:
+
+```bash
+cmake -S . -B build
+cmake --build build
+ctest --test-dir build --output-on-failure
+./build/rimau-server --check-config
+./build/rimau-server --protocols
+```
+
+Manual HTTP WAF smoke:
+
+```text
+temporary SQLite database on 127.0.0.1:18180 with modsecurity_enabled=true
+curl -i http://127.0.0.1:18180/
+curl -i http://127.0.0.1:18180/../../etc/passwd
+curl -i -A sqlmap/1.8 http://127.0.0.1:18180/
+```
+
+Result:
+
+- Build passed; static glibc DNS/NSS linker warnings for `getaddrinfo`/OpenSSL `gethostbyname` remain.
+- CTest passed, 9/9 tests.
+- Default config check passed and printed the new `modsecurity_*` keys.
+- Protocol status command passed.
+- Manual WAF smoke returned `200 OK` for `/`.
+- Manual WAF smoke returned `403 Forbidden` with `x-rimau-waf-rule-id: 930100` for path traversal.
+- Manual WAF smoke returned `403 Forbidden` with `x-rimau-waf-rule-id: 913100` for scanner user-agent.
+- A broad SQLi pattern initially caused a false positive on `Accept: */*`; the pattern was removed and a regression test for a normal curl-style request was added.

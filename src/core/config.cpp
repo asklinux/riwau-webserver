@@ -358,6 +358,12 @@ const std::vector<ConfigDefault>& config_defaults()
         { "reverse_proxy_circuit_breaker_enabled", "true", "Temporarily skip repeatedly failing reverse proxy upstreams" },
         { "reverse_proxy_circuit_breaker_failure_threshold", "3", "Failures before a reverse proxy upstream circuit opens" },
         { "reverse_proxy_circuit_breaker_cooldown_seconds", "10", "Seconds before retrying an opened reverse proxy upstream circuit" },
+        { "modsecurity_enabled", "false", "Enable Rimau built-in ModSecurity-compatible WAF inspection" },
+        { "modsecurity_owasp_crs_enabled", "true", "Enable built-in OWASP CRS-inspired rule subset for the WAF" },
+        { "modsecurity_blocking_enabled", "true", "Block requests whose WAF anomaly score reaches the configured threshold" },
+        { "modsecurity_anomaly_threshold", "5", "WAF anomaly score threshold for blocking" },
+        { "modsecurity_max_inspection_bytes", "131072", "Maximum bytes inspected per request field by the WAF" },
+        { "modsecurity_audit_log_enabled", "true", "Write WAF matches to the Rimau log" },
     };
     return defaults;
 }
@@ -611,6 +617,10 @@ void validate_config_value(const std::string& key, const std::string& value)
         parse_size(value, "reverse_proxy_circuit_breaker_failure_threshold");
     } else if (key == "reverse_proxy_circuit_breaker_cooldown_seconds") {
         parse_positive_int(value, "reverse_proxy_circuit_breaker_cooldown_seconds");
+    } else if (key == "modsecurity_anomaly_threshold") {
+        parse_size(value, "modsecurity_anomaly_threshold");
+    } else if (key == "modsecurity_max_inspection_bytes") {
+        parse_size(value, "modsecurity_max_inspection_bytes");
     } else if (key == "tls_min_version" || key == "tls_max_version") {
         if (!valid_tls_version(value)) {
             throw std::runtime_error(key + " must be TLSv1.2 or TLSv1.3");
@@ -633,7 +643,7 @@ void validate_config_value(const std::string& key, const std::string& value)
         if (key == "virtual_hosts") {
             (void)rimau::http::parse_virtual_host_rules(value);
         }
-    } else if (key == "http_keep_alive_enabled" || key == "reuse_port_enabled" || key == "tcp_keepalive_enabled" || key == "http1_enabled" || key == "http2_enabled" || key == "http3_enabled" || key == "tls_enabled" || key == "tls_sni_required" || key == "rate_limit_enabled" || key == "security_headers_enabled" || key == "server_header_enabled" || key == "virtual_hosts_enabled" || key == "reverse_proxy_tls_verify_upstream" || key == "reverse_proxy_circuit_breaker_enabled") {
+    } else if (key == "http_keep_alive_enabled" || key == "reuse_port_enabled" || key == "tcp_keepalive_enabled" || key == "http1_enabled" || key == "http2_enabled" || key == "http3_enabled" || key == "tls_enabled" || key == "tls_sni_required" || key == "rate_limit_enabled" || key == "security_headers_enabled" || key == "server_header_enabled" || key == "virtual_hosts_enabled" || key == "reverse_proxy_tls_verify_upstream" || key == "reverse_proxy_circuit_breaker_enabled" || key == "modsecurity_enabled" || key == "modsecurity_owasp_crs_enabled" || key == "modsecurity_blocking_enabled" || key == "modsecurity_audit_log_enabled") {
         parse_bool(value, key.c_str());
     }
 }
@@ -702,6 +712,12 @@ ServerConfig build_config(const std::map<std::string, std::string>& values)
     config.reverse_proxy_circuit_breaker_enabled = parse_bool(value_or_default(values, "reverse_proxy_circuit_breaker_enabled"), "reverse_proxy_circuit_breaker_enabled");
     config.reverse_proxy_circuit_breaker_failure_threshold = parse_size(value_or_default(values, "reverse_proxy_circuit_breaker_failure_threshold"), "reverse_proxy_circuit_breaker_failure_threshold");
     config.reverse_proxy_circuit_breaker_cooldown_seconds = parse_positive_int(value_or_default(values, "reverse_proxy_circuit_breaker_cooldown_seconds"), "reverse_proxy_circuit_breaker_cooldown_seconds");
+    config.modsecurity_enabled = parse_bool(value_or_default(values, "modsecurity_enabled"), "modsecurity_enabled");
+    config.modsecurity_owasp_crs_enabled = parse_bool(value_or_default(values, "modsecurity_owasp_crs_enabled"), "modsecurity_owasp_crs_enabled");
+    config.modsecurity_blocking_enabled = parse_bool(value_or_default(values, "modsecurity_blocking_enabled"), "modsecurity_blocking_enabled");
+    config.modsecurity_anomaly_threshold = parse_size(value_or_default(values, "modsecurity_anomaly_threshold"), "modsecurity_anomaly_threshold");
+    config.modsecurity_max_inspection_bytes = parse_size(value_or_default(values, "modsecurity_max_inspection_bytes"), "modsecurity_max_inspection_bytes");
+    config.modsecurity_audit_log_enabled = parse_bool(value_or_default(values, "modsecurity_audit_log_enabled"), "modsecurity_audit_log_enabled");
 
     if (config.host.empty()) {
         throw std::runtime_error("host cannot be empty");
@@ -895,7 +911,13 @@ std::string describe_config(const ServerConfig& config)
            << ", reverse_proxy_tls_verify_upstream=" << (config.reverse_proxy_tls_verify_upstream ? "true" : "false")
            << ", reverse_proxy_circuit_breaker_enabled=" << (config.reverse_proxy_circuit_breaker_enabled ? "true" : "false")
            << ", reverse_proxy_circuit_breaker_failure_threshold=" << config.reverse_proxy_circuit_breaker_failure_threshold
-           << ", reverse_proxy_circuit_breaker_cooldown_seconds=" << config.reverse_proxy_circuit_breaker_cooldown_seconds;
+           << ", reverse_proxy_circuit_breaker_cooldown_seconds=" << config.reverse_proxy_circuit_breaker_cooldown_seconds
+           << ", modsecurity_enabled=" << (config.modsecurity_enabled ? "true" : "false")
+           << ", modsecurity_owasp_crs_enabled=" << (config.modsecurity_owasp_crs_enabled ? "true" : "false")
+           << ", modsecurity_blocking_enabled=" << (config.modsecurity_blocking_enabled ? "true" : "false")
+           << ", modsecurity_anomaly_threshold=" << config.modsecurity_anomaly_threshold
+           << ", modsecurity_max_inspection_bytes=" << config.modsecurity_max_inspection_bytes
+           << ", modsecurity_audit_log_enabled=" << (config.modsecurity_audit_log_enabled ? "true" : "false");
     return output.str();
 }
 

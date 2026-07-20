@@ -73,6 +73,12 @@ struct ServerConfig {
     bool reverse_proxy_circuit_breaker_enabled = true;
     std::size_t reverse_proxy_circuit_breaker_failure_threshold = 3;
     int reverse_proxy_circuit_breaker_cooldown_seconds = 10;
+    bool modsecurity_enabled = false;
+    bool modsecurity_owasp_crs_enabled = true;
+    bool modsecurity_blocking_enabled = true;
+    std::size_t modsecurity_anomaly_threshold = 5;
+    std::size_t modsecurity_max_inspection_bytes = 128 * 1024;
+    bool modsecurity_audit_log_enabled = true;
 };
 
 void initialize_config_database(const std::filesystem::path& database_path);

@@ -67,6 +67,7 @@ Jika fail konfigurasi memerlukan nilai sensitif, gunakan placeholder seperti `CH
 - Bundled glibc path semasa wired untuk Linux x86_64 sahaja. Platform lain perlu keputusan dan validasi baru sebelum didakwa supported.
 - Virtual host, reverse proxy, dan server-side runtime declarations wajib dikonfigurasi melalui SQLite keys `virtual_hosts_enabled`, `virtual_hosts`, dan `reverse_proxy_*`; jangan tambah fail vhost config berasingan.
 - Jangan dakwa PHP, Python, Perl, atau bahasa server-side lain sudah terbina dalam sehingga runtime sebenar dibundle, dibina, diuji, dan direkod dalam `docs/DECISIONS.md`. Route `script:runtime:path` semasa hanya deklarasi dan mesti pulang `501 Not Implemented`.
+- ModSecurity support semasa ialah WAF terbina dalam yang ModSecurity-compatible pada tahap konsep dengan subset rules OWASP CRS-inspired dalam `rimau::http::inspect_request`; jangan dakwa `libmodsecurity` penuh atau full OWASP Core Rule Set sudah divendor sehingga source sebenar dibundle, rule penuh dipin, diuji, dan direkod sebagai keputusan baru.
 - Runtime I/O wajib kekal asynchronous dan non-blocking. Server utama guna Linux `epoll` reactor per worker thread; jangan hidupkan semula thread-per-connection blocking path atau single `poll()` loop.
 - Config key `http2_enabled` mengaktifkan partial HTTP/2 request serving untuk cleartext h2c dan TLS ALPN `h2` apabila `tls_alpn_protocols` mengandungi `h2`; config key `http3_enabled` masih status/control-plane untuk live server.
 - ALPN `h2` hanya boleh diiklankan apabila `http2_enabled=true` dan statusnya mesti kekal partial; jangan iklankan ALPN `h3` sebelum HTTP/3 request serving dan test end-to-end real client siap.
@@ -82,6 +83,7 @@ Jalankan command ini selepas perubahan C++ apabila boleh:
 cmake -S . -B build
 cmake --build build
 ctest --test-dir build --output-on-failure
+./build/rimau-waf-tests
 ./build/rimau-server --check-config
 ./build/rimau-server --database data/rimau.sqlite3 --check-config
 ./build/rimau-server --protocols

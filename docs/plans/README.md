@@ -55,6 +55,7 @@ Examples:
 017-http2-http3-wire-codecs.md
 018-http2-h2c-request-serving.md
 019-http2-tls-alpn-h2.md
+020-modsecurity-owasp-crs-built-in-waf.md
 ```
 
 ## Update Rules

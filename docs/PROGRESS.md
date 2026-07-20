@@ -87,6 +87,7 @@ Implemented:
 - HTTP/3 QUIC varint parser/serializer.
 - HTTP/3 frame parser/serializer and SETTINGS payload codec.
 - WAF unit test dan false-positive regression corpus melalui CTest.
+- Deterministic HTTP parser/framing fuzz smoke melalui CTest target `rimau_http_fuzz`.
 - Basic HTTP request parser.
 - Basic HTTP response serializer.
 - Response serializer support for caller-controlled `Connection` headers.
@@ -154,8 +155,8 @@ Semasa pemeriksaan awal pada 2026-07-18:
 | Server-side runtimes | Planned | `script:runtime:path` config returns `501`; PHP/Python/Perl are not bundled or executed yet. |
 | Request pipeline | Partial | Handler/factory/transaction/response sink implemented for static, vhost, reverse proxy, and script-placeholder HTTP/1.1. |
 | Config | Partial | SQLite table `rimau_config`, schema metadata table `rimau_schema_migrations`, protocol, TLS, keep-alive, static file, timeout, rate-limit, IP-list, security-header, virtual-host/proxy keys, and limited SIGHUP reload behavior. |
-| Security | Partial | Baseline HTTP framing hardening, timeout, rate limit, connection limit, built-in ModSecurity-compatible WAF subset with per-host overrides and structured redacted audit events, configurable security header values, and IPv4/IPv6 IP allow/block list are implemented; fuzzing and production hardening remain pending, while full ModSecurity/CRS integration is deferred beyond P1 by ADR-0034. |
-| Tests | Partial | Parser, HTTP/1.1 session/framing, HTTP/1.1 network integration including request-smuggling rejection, rate limiting, connection limits, request/header/body/idle timeout slow-client behavior, WAF block paths for HTTP/1.1/WebSocket/WebSocket proxy/partial HTTP/2, WAF virtual-host override and audit-log redaction behavior, WAF false-positive corpus, response serializer, handler pipeline, SQLite config, CLI config, protocol capability, HTTP/2 wire, HTTP/3 wire, virtual host, and WAF tests. |
+| Security | Partial | Baseline HTTP framing hardening, timeout, rate limit, connection limit, built-in ModSecurity-compatible WAF subset with per-host overrides and structured redacted audit events, configurable security header values, IPv4/IPv6 IP allow/block list, and deterministic parser/framing fuzz smoke are implemented; broader fuzzing and production hardening remain pending, while full ModSecurity/CRS integration is deferred beyond P1 by ADR-0034. |
+| Tests | Partial | Parser, HTTP/1.1 session/framing, deterministic HTTP parser/framing fuzz smoke, HTTP/1.1 network integration including request-smuggling rejection, rate limiting, connection limits, request/header/body/idle timeout slow-client behavior, WAF block paths for HTTP/1.1/WebSocket/WebSocket proxy/partial HTTP/2, WAF virtual-host override and audit-log redaction behavior, WAF false-positive corpus, response serializer, handler pipeline, SQLite config, CLI config, protocol capability, HTTP/2 wire, HTTP/3 wire, virtual host, and WAF tests. |
 | Deployment | Planned | No production deployment files. |
 | Database | Partial | SQLite is used for runtime configuration only; the SQLite engine is bundled static and config schema version `1` is recorded. |
 | I/O model | Partial | Linux `epoll` reactor with per-worker event loops and SO_REUSEPORT implemented; benchmarks still pending. |
@@ -165,16 +166,18 @@ Semasa pemeriksaan awal pada 2026-07-18:
 Most recent completed on 2026-07-20:
 
 ```bash
-cmake --build build --target rimau-server
-ctest --test-dir build --output-on-failure -R rimau_http1_network
+cmake -S . -B build
+cmake --build build --target rimau-http-fuzz-tests
+ctest --test-dir build --output-on-failure -R rimau_http_fuzz
 ctest --test-dir build --output-on-failure
 ```
 
 Result:
 
-- Server target built.
-- HTTP/1.1 network integration test passed, 1/1.
-- Full CTest passed, 12/12.
+- CMake configure passed.
+- `rimau-http-fuzz-tests` target built.
+- `rimau_http_fuzz` passed, 1/1.
+- Full CTest passed, 13/13.
 
 Phase 2 structured WAF audit log update:
 
@@ -1557,3 +1560,27 @@ Result:
 - Python syntax check passed.
 - HTTP/1.1 network integration test passed, 1/1.
 - Full CTest passed, 12/12.
+
+Phase 2 parser/framing fuzz smoke update:
+
+- Added deterministic HTTP parser/framing fuzz smoke target `rimau_http_fuzz`.
+- The harness mutates valid and invalid HTTP/1.1 seeds, smuggling-shaped inputs, Content-Length and chunked bodies, malformed headers, newline variants, truncations, and oversized-ish samples.
+- The harness exercises both `rimau::http::parse_request` and `rimau::http::next_http1_request_frame` with small and normal max-request limits.
+- Added CMake target `rimau-http-fuzz-tests` and CTest entry `rimau_http_fuzz`.
+- Marked the Phase 2 parser/framing fuzz checklist item complete in `docs/plans/021-ordered-update-checklist.md`.
+
+Validation on 2026-07-20 after parser/framing fuzz smoke update:
+
+```bash
+cmake -S . -B build
+cmake --build build --target rimau-http-fuzz-tests
+ctest --test-dir build --output-on-failure -R rimau_http_fuzz
+ctest --test-dir build --output-on-failure
+```
+
+Result:
+
+- CMake configure passed.
+- `rimau-http-fuzz-tests` target built.
+- `rimau_http_fuzz` passed, 1/1.
+- Full CTest passed, 13/13.

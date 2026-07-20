@@ -384,6 +384,7 @@ Production deployment, service manager, packaging, container, TLS certificate ha
 - Response serializer test asas melalui CTest.
 - Handler pipeline test asas melalui CTest.
 - HTTP/1.1 session/framing test melalui CTest tanpa socket event loop.
+- Deterministic parser/framing fuzz smoke melalui CTest target `rimau_http_fuzz`.
 - HTTP/1.1 network integration test melalui CTest untuk keep-alive, max request cap, request/header/body/idle timeout, pipelining, chunked body, request-smuggling rejection, rate limiting, connection limits, slow-client behavior, WAF block paths untuk HTTP/1.1/WebSocket/WebSocket proxy/partial HTTP/2, range, gzip, directory index, custom error page, WebSocket echo, dan WebSocket proxy.
 - HTTP/1.1 network integration test juga meliputi `virtual_host_waf_overrides` untuk default WAF block dan per-host allow path melalui `enabled:false`, `rule_exceptions`, dan threshold lebih tinggi.
 - WAF false-positive regression corpus melalui CTest untuk trafik normal curl, browser navigation/static asset, JSON API, form submission, dan WebSocket upgrade.
@@ -445,7 +446,7 @@ Production deployment, service manager, packaging, container, TLS certificate ha
 - SQLite config schema kini ada metadata version table v1, tetapi belum ada framework multi-step migration, downgrade policy, backup policy, atau admin UI.
 - Tiada admin UI/API untuk ubah config; buat masa ini guna CLI `--set`.
 - Tiada benchmark.
-- Tiada fuzzing parser.
+- Deterministic parser/framing fuzz smoke ada melalui `rimau_http_fuzz`; coverage fuzzing luas/libFuzzer berterusan masih belum ada. Needs verification.
 - Tiada production hardening seperti chroot, user switching, seccomp, distributed rate limiting, atau advanced slow-client scoring.
 
 ## Tests And Validation Commands

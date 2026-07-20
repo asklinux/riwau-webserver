@@ -77,8 +77,9 @@ Untuk setiap item:
 - [x] Tambah structured WAF audit log.
   - Done criteria: format audit jelas, tidak bocor secret, dan ada retention/rotation guidance.
   - Status: WAF matches now emit redacted `rimau_waf_audit` JSON payloads through the existing stderr logger; docs record no raw body/query/header/cookie/authorization/evidence logging and require retention/rotation through deployment logging until a dedicated audit sink is accepted.
-- [ ] Tambah parser/framing fuzz tests.
+- [x] Tambah parser/framing fuzz tests.
   - Done criteria: fuzz target boleh dijalankan dalam CI atau local documented command.
+  - Status: Added deterministic CTest fuzz smoke target `rimau_http_fuzz` via `tests/test_http_fuzz.cpp`; it mutates HTTP parser/framing inputs and can be run locally with `ctest --test-dir build --output-on-failure -R rimau_http_fuzz`.
 
 ## Phase 3: TLS And Certificate Lifecycle
 

@@ -354,6 +354,10 @@ if(RIMAU_ENABLE_TESTS)
         tests/test_http1_session.cpp)
     target_link_libraries(rimau-http1-session-tests PRIVATE rimau_core)
 
+    add_executable(rimau-http-fuzz-tests
+        tests/test_http_fuzz.cpp)
+    target_link_libraries(rimau-http-fuzz-tests PRIVATE rimau_core)
+
     add_executable(rimau-config-database-tests
         tests/test_config_database.cpp)
     target_link_libraries(rimau-config-database-tests PRIVATE rimau_core)
@@ -382,6 +386,7 @@ if(RIMAU_ENABLE_TESTS)
     add_test(NAME rimau_handler_pipeline COMMAND rimau-handler-pipeline-tests)
     add_test(NAME rimau_http_response COMMAND rimau-http-response-tests)
     add_test(NAME rimau_http1_session COMMAND rimau-http1-session-tests)
+    add_test(NAME rimau_http_fuzz COMMAND rimau-http-fuzz-tests)
     add_test(NAME rimau_config_database COMMAND rimau-config-database-tests)
     add_test(NAME rimau_protocol_capabilities COMMAND rimau-protocol-capabilities-tests)
     add_test(NAME rimau_http2_wire COMMAND rimau-http2-wire-tests)

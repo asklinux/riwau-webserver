@@ -65,7 +65,6 @@
 - Add token-bucket or leaky-bucket rate limiting if fixed-window behavior is too bursty. Needs verification.
 - Add shared/distributed rate limiting strategy for multi-process or multi-node deployments. Needs verification.
 - Add configurable deny response behavior for IP blocklist and connection-limit rejection.
-- Add fuzz tests for HTTP parser/framing.
 - Add hostname resolution or explicit dual IPv4/IPv6 listener configuration. Needs verification.
 
 ## P2 - HTTP/2

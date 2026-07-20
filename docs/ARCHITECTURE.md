@@ -767,8 +767,8 @@ Missing:
 - Distributed rate limiting.
 - Sandboxing.
 - Privilege dropping.
-- Full parser hardening and fuzzing.
-- Fuzz testing.
+- Full parser hardening beyond the deterministic `rimau_http_fuzz` CTest smoke.
+- Continuous or sanitizer-backed fuzz testing beyond the deterministic CTest smoke.
 - Full `libmodsecurity` transaction engine integration and full OWASP Core Rule Set bundle are deferred beyond P1 by ADR-0034. Needs verification.
 - Rich WAF rule tuning beyond ADR-0035, dedicated WAF audit log persistence beyond ADR-0036, and ModSecurity rule syntax parsing.
 - Advanced slow-client scoring.

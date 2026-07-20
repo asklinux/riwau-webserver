@@ -48,6 +48,7 @@ Pada Linux x86_64 dengan GNU/Clang, CMake membina GNU glibc 2.43 daripada source
 cmake -S . -B build
 cmake --build build
 ctest --test-dir build --output-on-failure
+ctest --test-dir build --output-on-failure -R rimau_http_fuzz
 ```
 
 Build pertama memerlukan network untuk source archive yang dipin dalam `CMakeLists.txt` kecuali cache CMake sudah ada. Build-time masih memerlukan compiler dan tool asas host seperti `gcc`/`g++`, `make`, `perl`, `gawk`, `msgfmt`, `python3`, dan `m4`; sasaran yang dibuang ialah runtime shared-library dependency untuk binary deployable. Bundled glibc semasa hanya wired untuk Linux x86_64.

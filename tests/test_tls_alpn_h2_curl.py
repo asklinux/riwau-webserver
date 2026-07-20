@@ -101,6 +101,16 @@ def has_h2_alpn_selection(output: str) -> bool:
     return any(pattern in output for pattern in patterns)
 
 
+def has_http2_usage(output: str) -> bool:
+    patterns = [
+        "using HTTP/2",
+        "Using HTTP2",
+        "Connection state changed (HTTP/2 confirmed)",
+        "[HTTP/2]",
+    ]
+    return any(pattern in output for pattern in patterns)
+
+
 def main() -> int:
     if len(sys.argv) != 4:
         print("usage: test_tls_alpn_h2_curl.py /path/to/rimau-server /path/to/runtime-root /path/to/openssl", file=sys.stderr)
@@ -167,7 +177,7 @@ def main() -> int:
         output = result.stdout + result.stderr
 
         assert has_h2_alpn_selection(output), output
-        assert "using HTTP/2" in output or "[HTTP/2]" in output, output
+        assert has_http2_usage(output), output
 
         if result.returncode == 0:
             body = (root / "curl-body.txt").read_text(encoding="utf-8")

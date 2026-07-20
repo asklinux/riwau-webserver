@@ -190,6 +190,7 @@ Phase 3 TLS ALPN `h2` real-client smoke update:
 - Added CTest target `rimau_tls_alpn_h2_curl`.
 - Test starts a temporary TLS Rimau server, generates a self-signed test certificate with the bundled OpenSSL binary, runs `curl --http2`, and verifies real-client ALPN selection of `h2`.
 - Test skips only when `curl` is missing or does not report HTTP2 support.
+- Test accepts both curl 8-style `using HTTP/2`/`[HTTP/2]` verbose output and curl 7.81-style `Using HTTP2`/`Connection state changed (HTTP/2 confirmed)` output.
 - Current test accepts the known partial HTTP/2 HPACK Huffman `COMPRESSION_ERROR` request path, so this validates ALPN negotiation only; full curl/nghttp2 HTTP/2 request success remains pending.
 - Added ADR-0037 and marked the Phase 3 ordered checklist item complete.
 

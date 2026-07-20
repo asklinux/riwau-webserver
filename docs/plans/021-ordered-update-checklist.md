@@ -74,8 +74,9 @@ Untuk setiap item:
 - [x] Tambah per-virtual-host WAF controls jika diperlukan.
   - Done criteria: vhost boleh override enable/threshold/rule exception dari SQLite.
   - Status: SQLite `virtual_host_waf_overrides` supports per-host `enabled`, `owasp_crs`, `blocking`, `threshold`, and numeric `rule_exceptions`; HTTP/1.1 network integration verifies default WAF blocking and host override allow paths.
-- [ ] Tambah structured WAF audit log.
+- [x] Tambah structured WAF audit log.
   - Done criteria: format audit jelas, tidak bocor secret, dan ada retention/rotation guidance.
+  - Status: WAF matches now emit redacted `rimau_waf_audit` JSON payloads through the existing stderr logger; docs record no raw body/query/header/cookie/authorization/evidence logging and require retention/rotation through deployment logging until a dedicated audit sink is accepted.
 - [ ] Tambah parser/framing fuzz tests.
   - Done criteria: fuzz target boleh dijalankan dalam CI atau local documented command.
 

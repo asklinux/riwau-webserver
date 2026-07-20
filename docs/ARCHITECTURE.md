@@ -504,6 +504,10 @@ host=static:document-root;host=proxy:http://upstream:port/base,https://backup:po
 site.test=enabled:false;api.test=threshold:10,rule_exceptions:930100|942100;*.tenant.test=blocking:false
 ```
 
+When `modsecurity_audit_log_enabled=true`, WAF matches emit a structured `rimau_waf_audit` JSON payload through the existing stderr logger. The event records outcome, worker, client IP, engine, ruleset, first rule id, severity, tag, score, threshold, blocking mode, match count, method, host, path, and variable name. It intentionally does not log request body, query string, header values, cookies, authorization values, or WAF evidence. String values are JSON-escaped and bounded.
+
+Rimau does not yet own a dedicated audit file, retention engine, or rotation engine. Production deployments should route stderr through systemd-journald, a container log driver, or supervisor-managed files with logrotate. Audit logs should be readable only by the service owner/security operators. A 7-30 day retention window is a reasonable starting policy until the operator defines a site-specific retention requirement. Needs verification.
+
 SIGHUP reloads SQLite config values that can safely change without recreating listener sockets or worker threads. Dynamic values include `document_root`, `directory_index`, `error_page`, `max_request_bytes`, HTTP keep-alive settings, TCP keepalive settings for newly accepted sockets, protocol status flags, graceful shutdown timeout, request/header/body/idle timeout, rate-limit settings, IPv4/IPv6 IP allow/block lists, security header behavior/values, virtual host and reverse proxy settings, WAF settings, and TLS certificate/key/SNI/TLS settings for new TLS connections. Changes to bind address, port, listener backlog, worker count, epoll batch size, `SO_REUSEPORT`, connection pool sizing, HTTP/1 enablement, or `tls_enabled` require restart.
 
 Production config ownership, backup, and migration behavior are not final. Needs verification.
@@ -766,7 +770,7 @@ Missing:
 - Full parser hardening and fuzzing.
 - Fuzz testing.
 - Full `libmodsecurity` transaction engine integration and full OWASP Core Rule Set bundle are deferred beyond P1 by ADR-0034. Needs verification.
-- Rich WAF rule tuning beyond ADR-0035, structured audit log persistence, and ModSecurity rule syntax parsing.
+- Rich WAF rule tuning beyond ADR-0035, dedicated WAF audit log persistence beyond ADR-0036, and ModSecurity rule syntax parsing.
 - Advanced slow-client scoring.
 - Safe default production file permissions.
 - Reverse proxy request/response policy hardening beyond current hop-by-hop header stripping, buffered-size limit, WebSocket proxy handshake validation, passive circuit breaker, basic retry, and TLS transport.

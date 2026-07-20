@@ -158,6 +158,17 @@ def http_request(port: int, request: bytes):
         connection.close()
 
 
+def wait_for_log_contains(path: Path, needle: str, timeout: float = 3.0) -> str:
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if path.exists():
+            content = path.read_text(encoding="utf-8", errors="replace")
+            if needle in content:
+                return content
+        time.sleep(0.05)
+    return path.read_text(encoding="utf-8", errors="replace") if path.exists() else ""
+
+
 def assert_rejected_request(port: int, name: str, request: bytes, expected_status: int = 400) -> None:
     connection = HttpConnection(port)
     try:
@@ -926,9 +937,9 @@ def test_waf_entry_points(server_path: Path, runtime_root: Path) -> None:
         assert b"Forbidden by Rimau ModSecurity compatible WAF" in body, (headers, body)
 
 
-def scanner_request(host: str) -> bytes:
+def scanner_request(host: str, target: str = "/") -> bytes:
     return (
-        f"GET / HTTP/1.1\r\nHost: {host}\r\nUser-Agent: sqlmap/1.8\r\nConnection: close\r\n\r\n"
+        f"GET {target} HTTP/1.1\r\nHost: {host}\r\nUser-Agent: sqlmap/1.8\r\nConnection: close\r\n\r\n"
     ).encode("ascii")
 
 
@@ -943,10 +954,15 @@ def test_virtual_host_waf_overrides(server_path: Path, runtime_root: Path) -> No
         "virtual_host_waf_overrides=disabled.test=enabled:false;exceptions.test=rule_exceptions:913100;threshold.test=threshold:10",
     ]
     with RimauServer(server_path, runtime_root, extra_updates=updates) as server:
-        status, _, headers, body = http_request(server.port, scanner_request("localhost"))
+        status, _, headers, body = http_request(server.port, scanner_request("localhost", "/?token=secret"))
         assert status == 403, (status, headers, body)
         assert headers.get("x-rimau-waf") == "blocked", headers
         assert headers.get("x-rimau-waf-rule-id") == "913100", headers
+        log_content = wait_for_log_contains(server.log, '"event":"rimau_waf_audit"')
+        assert '"outcome":"blocked"' in log_content, log_content
+        assert '"rule_id":913100' in log_content, log_content
+        assert '"path":"/"' in log_content, log_content
+        assert "token=secret" not in log_content, log_content
 
         for host in ("disabled.test", "exceptions.test", "threshold.test"):
             status, _, headers, body = http_request(server.port, scanner_request(host))

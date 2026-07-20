@@ -39,6 +39,7 @@
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <sys/epoll.h>
 #include <sys/socket.h>
 #include <thread>
@@ -1862,6 +1863,88 @@ std::optional<std::vector<rimau::http::ReverseProxyTarget>> websocket_proxy_upst
     return rule->upstreams;
 }
 
+std::string json_escape(std::string_view value)
+{
+    std::ostringstream output;
+    for (const unsigned char ch : value) {
+        switch (ch) {
+        case '"':
+            output << "\\\"";
+            break;
+        case '\\':
+            output << "\\\\";
+            break;
+        case '\b':
+            output << "\\b";
+            break;
+        case '\f':
+            output << "\\f";
+            break;
+        case '\n':
+            output << "\\n";
+            break;
+        case '\r':
+            output << "\\r";
+            break;
+        case '\t':
+            output << "\\t";
+            break;
+        default:
+            if (ch < 0x20 || ch == 0x7f) {
+                output << "\\u00";
+                constexpr char hex[] = "0123456789abcdef";
+                output << hex[(ch >> 4) & 0x0f] << hex[ch & 0x0f];
+            } else {
+                output << static_cast<char>(ch);
+            }
+            break;
+        }
+    }
+    return output.str();
+}
+
+std::string bounded_audit_value(std::string value)
+{
+    constexpr std::size_t max_audit_value_bytes = 256;
+    if (value.size() > max_audit_value_bytes) {
+        value.resize(max_audit_value_bytes);
+        value += "...";
+    }
+    return value;
+}
+
+std::string waf_audit_log_line(
+    std::size_t worker_id,
+    std::string_view client_ip,
+    const rimau::http::Request& request,
+    const rimau::http::WafSettings& settings,
+    const rimau::http::WafResult& result)
+{
+    const auto& match = result.matches.front();
+    const auto host = request.header("host").value_or("");
+
+    std::ostringstream output;
+    output << "{\"event\":\"rimau_waf_audit\""
+           << ",\"worker\":" << worker_id
+           << ",\"client_ip\":\"" << json_escape(bounded_audit_value(std::string(client_ip))) << "\""
+           << ",\"outcome\":\"" << (result.allowed ? "matched" : "blocked") << "\""
+           << ",\"engine\":\"" << json_escape(result.engine) << "\""
+           << ",\"ruleset\":\"" << json_escape(result.ruleset) << "\""
+           << ",\"rule_id\":" << match.rule_id
+           << ",\"severity\":\"" << json_escape(match.severity) << "\""
+           << ",\"tag\":\"" << json_escape(match.tag) << "\""
+           << ",\"score\":" << result.anomaly_score
+           << ",\"threshold\":" << settings.anomaly_threshold
+           << ",\"blocking\":" << (settings.blocking_enabled ? "true" : "false")
+           << ",\"matches\":" << result.matches.size()
+           << ",\"method\":\"" << json_escape(bounded_audit_value(request.method)) << "\""
+           << ",\"host\":\"" << json_escape(bounded_audit_value(host)) << "\""
+           << ",\"path\":\"" << json_escape(bounded_audit_value(request.path)) << "\""
+           << ",\"variable\":\"" << json_escape(match.variable) << "\""
+           << "}";
+    return output.str();
+}
+
 class SecurityState {
 public:
     enum class AcceptDecision {
@@ -3269,21 +3352,14 @@ private:
 
     std::optional<rimau::http::Response> inspect_waf(const rimau::http::Request& request) const
     {
-        const auto result = rimau::http::inspect_request(request, waf_settings(request));
+        const auto settings = waf_settings(request);
+        const auto result = rimau::http::inspect_request(request, settings);
         if (!result.inspected || result.matches.empty()) {
             return std::nullopt;
         }
 
         if (config_->modsecurity_audit_log_enabled) {
-            const auto& match = result.matches.front();
-            log(
-                LogLevel::warning,
-                "worker " + std::to_string(worker_id_) + " waf "
-                    + (result.allowed ? "matched " : "blocked ")
-                    + request.method + " " + request.target
-                    + " rule=" + std::to_string(match.rule_id)
-                    + " score=" + std::to_string(result.anomaly_score)
-                    + " variable=" + match.variable);
+            log(LogLevel::warning, waf_audit_log_line(worker_id_, client_ip_, request, settings, result));
         }
 
         if (!result.allowed) {

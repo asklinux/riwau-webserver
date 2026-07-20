@@ -192,6 +192,8 @@ Contoh:
 ./build/rimau-server --database data/rimau.sqlite3 --set "virtual_host_waf_overrides=site.test=enabled:false;api.test=threshold:10,rule_exceptions:930100|942100;*.tenant.test=blocking:false"
 ```
 
+Jika `modsecurity_audit_log_enabled=true`, setiap WAF match menghasilkan event `rimau_waf_audit` berstruktur melalui stderr logger. Event ini tidak menulis raw body, query string, header values, cookie, authorization, atau WAF evidence. Rotation/retention perlu dibuat oleh systemd-journald, container log driver, atau logrotate sehingga audit sink khusus ditambah.
+
 Static vhost melayan fail dari document root host tersebut. Proxy vhost menghantar request kepada upstream HTTP/1.1 dan menyalin response kembali kepada client. Jika request ialah WebSocket Upgrade, Rimau membuat upstream WebSocket handshake dan kemudian tunnel data dua hala melalui worker `epoll` yang sama. Jika beberapa upstream diberi, Rimau memilih secara round-robin asas dan boleh retry ke upstream seterusnya mengikut `reverse_proxy_retry_count`. Upstream yang gagal berulang kali boleh dipintas sementara oleh passive circuit breaker dan akan menghasilkan `503 Service Unavailable` jika semua target terbuka circuit-nya. Script vhost hanya declaration buat masa ini dan akan pulang `501` sehingga runtime bundled sebenar dipilih dan diintegrasi.
 
 Nota keselamatan: HTTPS upstream menggunakan bundled OpenSSL untuk transport TLS. `reverse_proxy_tls_verify_upstream=true` menghidupkan verification menggunakan default trust paths; policy CA/per-upstream yang lebih lengkap masih kerja susulan.

@@ -701,7 +701,7 @@ The project owner requested ModSecurity and OWASP rules to be built into the sys
 
 Consequence:
 
-The current WAF is useful but partial. It does not parse ModSecurity rule syntax, does not implement the full ModSecurity transaction phase model, does not bundle the full OWASP Core Rule Set, and does not persist structured audit logs. ADR-0034 later keeps the Rimau-native WAF for P1 and defers full `libmodsecurity` plus full OWASP CRS source bundling until version/license/build validation is accepted. ADR-0035 later adds basic per-virtual-host WAF overrides. Needs verification.
+The current WAF is useful but partial. It does not parse ModSecurity rule syntax, does not implement the full ModSecurity transaction phase model, does not bundle the full OWASP Core Rule Set, and does not persist separate ModSecurity audit logs. ADR-0034 later keeps the Rimau-native WAF for P1 and defers full `libmodsecurity` plus full OWASP CRS source bundling until version/license/build validation is accepted. ADR-0035 later adds basic per-virtual-host WAF overrides. ADR-0036 later adds structured one-line WAF audit events through the existing logger. Needs verification.
 
 ## ADR-0027: Version The SQLite Config Schema
 
@@ -927,3 +927,40 @@ The project already has virtual host routing and a global WAF. Production sites 
 Consequence:
 
 This is basic per-host WAF tuning, not full ModSecurity rule exclusion syntax. Rule exceptions disable matching by numeric built-in rule id for the selected host pattern only. There is no per-path, per-parameter, phase-specific, tag-based, or time-bound exclusion language yet. Needs verification if a richer policy model is required.
+
+## ADR-0036: Add Structured WAF Audit Events
+
+- Date: 2026-07-20
+- Status: Accepted
+
+Decision:
+
+When `modsecurity_audit_log_enabled=true`, emit one structured WAF audit event through the existing logger for each inspected request that has at least one WAF match.
+
+Format:
+
+The logger still prefixes every line with timestamp and log level. The message payload for WAF audit events is a single JSON object with stable keys:
+
+```json
+{"event":"rimau_waf_audit","worker":1,"client_ip":"127.0.0.1","outcome":"blocked","engine":"rimau-modsecurity-compatible","ruleset":"builtin-owasp-crs-subset","rule_id":913100,"severity":"critical","tag":"application-multi/scanner","score":5,"threshold":5,"blocking":true,"matches":1,"method":"GET","host":"example.test","path":"/","variable":"REQUEST_HEADERS"}
+```
+
+Secret handling:
+
+- Do not log raw request body.
+- Do not log raw header values, cookies, authorization values, or WAF evidence.
+- Do not log query string; log `Request::path` only.
+- Bound string fields before JSON escaping.
+- Log only the first matching rule id/severity/tag/variable plus total match count.
+
+Rotation and retention:
+
+Rimau still writes through stderr via `rimau::core::log`; it does not own a dedicated audit file, built-in retention, or built-in rotation. Production deployments should route stderr to systemd-journald, a container log driver, or a dedicated supervisor-managed file with logrotate. Keep audit logs readable only by the service owner/security operators, avoid world-readable logs, and choose retention according to site policy and legal requirements. Suggested initial retention window is 7-30 days until an operator policy is accepted. Needs verification.
+
+Reason:
+
+The previous free-form WAF log line included `request.target`, which can include query strings. A structured payload is easier to parse and safer for operations because it avoids request bodies, query strings, header values, and evidence snippets.
+
+Consequence:
+
+WAF audit output is structured and redacted, but it is not a full ModSecurity audit log format and is not persisted separately from the normal server log. A future persistent audit sink may still be needed. Needs verification.

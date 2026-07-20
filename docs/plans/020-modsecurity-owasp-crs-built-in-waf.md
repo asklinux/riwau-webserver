@@ -43,7 +43,7 @@ Current rules are a small OWASP CRS-inspired subset:
 - Do not parse ModSecurity rule syntax.
 - Do not implement the full ModSecurity phase engine.
 - Per-virtual-host WAF overrides were out of scope for the initial WAF subset, but ADR-0035 later added SQLite `virtual_host_waf_overrides`.
-- Do not add persistent structured WAF audit logs.
+- Structured WAF audit events were out of scope for the initial WAF subset, but ADR-0036 later added redacted one-line `rimau_waf_audit` events through the existing logger. Dedicated persistent audit storage remains future work. Needs verification.
 
 These remain `Needs verification` because they require dependency selection, source/version pinning, licensing review, update tooling, broader tests, and performance validation.
 

@@ -58,7 +58,7 @@
 ## P1 - Security Hardening
 
 - Revisit full `libmodsecurity` plus full OWASP Core Rule Set after P1 only with pinned source/version, license notes, build plan, update process, test corpus, and rule exclusion policy. Needs verification.
-- Add structured WAF audit log format and persistence policy. Needs verification.
+- Add dedicated persistent WAF audit sink if stderr/journald/container logging is not enough. Needs verification.
 - Add ModSecurity rule syntax/parser support only if future full compatibility is accepted. Needs verification.
 - Add CTest or integration harness for IPv6 listener and IPv6 allowlist/blocklist behavior.
 - Add support for arbitrary custom security header names if the fixed built-in set is not enough. Needs verification.

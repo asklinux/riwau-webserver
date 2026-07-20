@@ -33,74 +33,6 @@ def curl_supports_http2(curl: str) -> bool:
     return result.returncode == 0 and "HTTP2" in result.stdout
 
 
-def generate_cert(openssl: Path, cert: Path, key: Path) -> None:
-    config = cert.parent / "openssl-test.cnf"
-    config.write_text(
-        "[req]\n"
-        "distinguished_name = dn\n"
-        "prompt = no\n"
-        "\n"
-        "[dn]\n"
-        "CN = localhost\n",
-        encoding="utf-8",
-    )
-    subprocess.run(
-        [
-            str(openssl),
-            "req",
-            "-x509",
-            "-newkey",
-            "rsa:2048",
-            "-sha256",
-            "-nodes",
-            "-days",
-            "7",
-            "-keyout",
-            str(key),
-            "-out",
-            str(cert),
-            "-config",
-            str(config),
-            "-subj",
-            "/CN=localhost",
-            "-addext",
-            "subjectAltName=DNS:localhost,IP:127.0.0.1",
-        ],
-        check=True,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    os.chmod(key, 0o600)
-
-
-def configure_server(server: Path, database: Path, document_root: Path, cert: Path, key: Path, port: int) -> None:
-    updates = [
-        "host=127.0.0.1",
-        f"port={port}",
-        f"document_root={document_root}",
-        "worker_threads=1",
-        "tls_enabled=true",
-        f"tls_certificate_file={cert}",
-        f"tls_private_key_file={key}",
-        "http2_enabled=true",
-        "tls_alpn_protocols=h2,http/1.1",
-        "rate_limit_enabled=false",
-    ]
-    command = [str(server), "--database", str(database)]
-    for update in updates:
-        command.extend(["--set", update])
-    subprocess.run(command, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
-
-
-def has_h2_alpn_selection(output: str) -> bool:
-    patterns = [
-        "ALPN: server accepted h2",
-        "ALPN, server accepted to use h2",
-        "ALPN: server accepted to use h2",
-    ]
-    return any(pattern in output for pattern in patterns)
-
-
 def has_http2_usage(output: str) -> bool:
     patterns = [
         "using HTTP/2",
@@ -111,44 +43,49 @@ def has_http2_usage(output: str) -> bool:
     return any(pattern in output for pattern in patterns)
 
 
+def configure_server(server: Path, database: Path, document_root: Path, port: int) -> None:
+    updates = [
+        "host=127.0.0.1",
+        f"port={port}",
+        f"document_root={document_root}",
+        "worker_threads=1",
+        "tls_enabled=false",
+        "http2_enabled=true",
+        "rate_limit_enabled=false",
+    ]
+    command = [str(server), "--database", str(database)]
+    for update in updates:
+        command.extend(["--set", update])
+    subprocess.run(command, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+
+
 def main() -> int:
-    if len(sys.argv) != 4:
-        print("usage: test_tls_alpn_h2_curl.py /path/to/rimau-server /path/to/runtime-root /path/to/openssl", file=sys.stderr)
+    if len(sys.argv) != 3:
+        print("usage: test_http2_h2c_curl.py /path/to/rimau-server /path/to/runtime-root", file=sys.stderr)
         return 2
 
     curl = os.environ.get("RIMAU_CURL") or shutil.which("curl")
     if not curl:
-        print("SKIP: curl not found; cannot run real HTTP/2 client ALPN test")
+        print("SKIP: curl not found; cannot run real h2c client test")
         return 0
     if not curl_supports_http2(curl):
-        print("SKIP: curl does not report HTTP2 support; cannot run real HTTP/2 client ALPN test")
+        print("SKIP: curl does not report HTTP2 support; cannot run real h2c client test")
         return 0
 
     server = Path(sys.argv[1]).resolve()
     runtime_root = Path(sys.argv[2]).resolve()
-    openssl = Path(sys.argv[3]).resolve()
-    if not openssl.exists():
-        raise RuntimeError(f"bundled OpenSSL binary not found: {openssl}")
-
     runtime_root.mkdir(parents=True, exist_ok=True)
-    root = Path(tempfile.mkdtemp(prefix="rimau-tls-alpn-h2-", dir=runtime_root))
+    root = Path(tempfile.mkdtemp(prefix="rimau-h2c-curl-", dir=runtime_root))
     process = None
     try:
         document_root = root / "public"
-        cert_dir = root / "certs"
         document_root.mkdir()
-        cert_dir.mkdir()
-        (document_root / "index.html").write_text("Rimau real curl HTTP/2 ALPN test\n", encoding="utf-8")
-
-        cert = cert_dir / "rimau-dev.crt"
-        key = cert_dir / "rimau-dev.key"
+        (document_root / "index.html").write_text("Rimau real curl h2c test\n", encoding="utf-8")
         database = root / "rimau.sqlite3"
         log = root / "rimau.log"
         port = free_port()
 
-        generate_cert(openssl, cert, key)
-        configure_server(server, database, document_root, cert, key, port)
-
+        configure_server(server, database, document_root, port)
         log_handle = log.open("wb")
         process = subprocess.Popen(
             [str(server), "--database", str(database)],
@@ -161,29 +98,25 @@ def main() -> int:
         result = subprocess.run(
             [
                 curl,
-                "--http2",
-                "--insecure",
+                "--http2-prior-knowledge",
                 "--max-time",
                 "5",
                 "--verbose",
                 "--output",
                 str(root / "curl-body.txt"),
-                f"https://127.0.0.1:{port}/",
+                f"http://127.0.0.1:{port}/",
             ],
             check=False,
             capture_output=True,
             text=True,
         )
         output = result.stdout + result.stderr
-
-        assert has_h2_alpn_selection(output), output
         assert has_http2_usage(output), output
-
         assert result.returncode == 0, output + "\n--- rimau log ---\n" + log.read_text(encoding="utf-8", errors="replace")
         body = (root / "curl-body.txt").read_text(encoding="utf-8")
-        assert body == "Rimau real curl HTTP/2 ALPN test\n", (body, output)
+        assert body == "Rimau real curl h2c test\n", (body, output)
 
-        print("TLS ALPN h2 real HTTP/2 client test passed")
+        print("h2c real HTTP/2 client test passed")
         return 0
     finally:
         if process is not None and process.poll() is None:

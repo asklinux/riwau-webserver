@@ -371,6 +371,7 @@ const std::vector<ConfigDefault>& config_defaults()
         { "reverse_proxy_read_timeout_seconds", "30", "HTTP reverse proxy upstream read timeout" },
         { "reverse_proxy_max_response_bytes", "1048576", "Maximum buffered reverse proxy upstream response bytes" },
         { "reverse_proxy_retry_count", "1", "Additional reverse proxy upstream attempts after the first failure" },
+        { "reverse_proxy_load_balancing_policy", "round_robin", "Reverse proxy upstream selection policy: round_robin, failover, or stable_hash" },
         { "reverse_proxy_tls_verify_upstream", "false", "Verify HTTPS reverse proxy upstream certificates with default trust paths" },
         { "reverse_proxy_circuit_breaker_enabled", "true", "Temporarily skip repeatedly failing reverse proxy upstreams" },
         { "reverse_proxy_circuit_breaker_failure_threshold", "3", "Failures before a reverse proxy upstream circuit opens" },
@@ -687,7 +688,7 @@ void validate_config_value(const std::string& key, const std::string& value)
         || key == "security_header_content_security_policy" || key == "security_header_strict_transport_security"
         || key == "security_header_x_content_type_options" || key == "security_header_x_frame_options"
         || key == "security_header_referrer_policy" || key == "security_header_cross_origin_opener_policy"
-        || key == "virtual_hosts" || key == "virtual_host_waf_overrides") {
+        || key == "virtual_hosts" || key == "virtual_host_waf_overrides" || key == "reverse_proxy_load_balancing_policy") {
         if (contains_control_character(value)) {
             throw std::runtime_error(key + " cannot contain control characters");
         }
@@ -705,6 +706,9 @@ void validate_config_value(const std::string& key, const std::string& value)
         }
         if (key == "virtual_host_waf_overrides") {
             (void)rimau::http::parse_virtual_host_waf_overrides(value);
+        }
+        if (key == "reverse_proxy_load_balancing_policy") {
+            (void)rimau::http::parse_reverse_proxy_load_balancing_policy(value);
         }
     } else if (key == "http_keep_alive_enabled" || key == "reuse_port_enabled" || key == "tcp_keepalive_enabled" || key == "http1_enabled" || key == "http2_enabled" || key == "http3_enabled" || key == "tls_enabled" || key == "tls_sni_required" || key == "rate_limit_enabled" || key == "security_headers_enabled" || key == "server_header_enabled" || key == "virtual_hosts_enabled" || key == "reverse_proxy_tls_verify_upstream" || key == "reverse_proxy_circuit_breaker_enabled" || key == "modsecurity_enabled" || key == "modsecurity_owasp_crs_enabled" || key == "modsecurity_blocking_enabled" || key == "modsecurity_audit_log_enabled") {
         parse_bool(value, key.c_str());
@@ -774,6 +778,7 @@ ServerConfig build_config(const std::map<std::string, std::string>& values)
     config.reverse_proxy_read_timeout_seconds = parse_positive_int(value_or_default(values, "reverse_proxy_read_timeout_seconds"), "reverse_proxy_read_timeout_seconds");
     config.reverse_proxy_max_response_bytes = parse_size(value_or_default(values, "reverse_proxy_max_response_bytes"), "reverse_proxy_max_response_bytes");
     config.reverse_proxy_retry_count = parse_non_negative_size(value_or_default(values, "reverse_proxy_retry_count"), "reverse_proxy_retry_count");
+    config.reverse_proxy_load_balancing_policy = value_or_default(values, "reverse_proxy_load_balancing_policy");
     config.reverse_proxy_tls_verify_upstream = parse_bool(value_or_default(values, "reverse_proxy_tls_verify_upstream"), "reverse_proxy_tls_verify_upstream");
     config.reverse_proxy_circuit_breaker_enabled = parse_bool(value_or_default(values, "reverse_proxy_circuit_breaker_enabled"), "reverse_proxy_circuit_breaker_enabled");
     config.reverse_proxy_circuit_breaker_failure_threshold = parse_size(value_or_default(values, "reverse_proxy_circuit_breaker_failure_threshold"), "reverse_proxy_circuit_breaker_failure_threshold");
@@ -843,6 +848,7 @@ ServerConfig build_config(const std::map<std::string, std::string>& values)
     }
     (void)rimau::http::parse_virtual_host_rules(config.virtual_hosts);
     (void)rimau::http::parse_virtual_host_waf_overrides(config.virtual_host_waf_overrides);
+    (void)rimau::http::parse_reverse_proxy_load_balancing_policy(config.reverse_proxy_load_balancing_policy);
     if (config.tls_certificate_file.empty()) {
         throw std::runtime_error("tls_certificate_file cannot be empty");
     }
@@ -993,6 +999,7 @@ std::string describe_config(const ServerConfig& config)
            << ", reverse_proxy_read_timeout_seconds=" << config.reverse_proxy_read_timeout_seconds
            << ", reverse_proxy_max_response_bytes=" << config.reverse_proxy_max_response_bytes
            << ", reverse_proxy_retry_count=" << config.reverse_proxy_retry_count
+           << ", reverse_proxy_load_balancing_policy=" << config.reverse_proxy_load_balancing_policy
            << ", reverse_proxy_tls_verify_upstream=" << (config.reverse_proxy_tls_verify_upstream ? "true" : "false")
            << ", reverse_proxy_circuit_breaker_enabled=" << (config.reverse_proxy_circuit_breaker_enabled ? "true" : "false")
            << ", reverse_proxy_circuit_breaker_failure_threshold=" << config.reverse_proxy_circuit_breaker_failure_threshold

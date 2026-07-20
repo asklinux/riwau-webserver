@@ -66,12 +66,15 @@ Implemented:
 - SQLite-configured virtual host routing with exact host and simple `*.domain` wildcard matching.
 - Static virtual hosts with per-host document roots.
 - Baseline reverse proxy virtual hosts for upstream `http://` and `https://`.
-- Reverse proxy multiple upstream targets per vhost with basic round-robin selection.
+- HTTP/1.1 normal reverse proxy upstream connect/write/read state machine through the worker `epoll` reactor.
+- Reverse proxy multiple upstream targets per vhost with SQLite `round_robin`, `failover`, or `stable_hash` selection.
 - Reverse proxy retry/failover through SQLite `reverse_proxy_retry_count`.
 - Optional HTTPS upstream certificate verification through SQLite `reverse_proxy_tls_verify_upstream`.
 - Passive reverse proxy circuit breaker through SQLite threshold/cooldown keys.
-- WAF blocking for HTTP/1.1, WebSocket upgrade, WebSocket reverse proxy upgrade, and partial HTTP/2 request dispatch.
+- WAF blocking for HTTP/1.1, WebSocket upgrade, WebSocket reverse proxy upgrade, and HTTP/2 request dispatch.
 - Script virtual host declarations such as `script:php:path`; execution returns explicit `501 Not Implemented`.
+- P2 server-side runtime safety baseline: ADR-0044 keeps script vhosts declaration-only and forbids shelling out to system interpreters.
+- Script vhost no-shell-out regression coverage for fake `php`, `python`, and `perl` binaries in `PATH`.
 - Linux `epoll` reactor per worker thread for the main server runtime.
 - Non-blocking listener and client socket I/O.
 - Non-blocking OpenSSL TLS handshake/read/write/shutdown state handling.
@@ -99,7 +102,7 @@ Implemented:
 - Proxygen-inspired request handler pipeline.
 - `RequestHandler`, `RequestHandlerFactory`, `Transaction`, `ResponseSink`, `ResponseBuilder`, and `StaticFileHandler`.
 - Static document root `public/`.
-- HTTP/1.1 network integration CTest for keep-alive, max request cap, idle timeout, pipelining, chunked body, request-smuggling rejection, rate limiting, connection limits, timeout/slow-client behavior, WAF block paths for HTTP/1.1/WebSocket/WebSocket proxy/partial HTTP/2, range, gzip, WebSocket echo, and WebSocket proxy.
+- HTTP/1.1 network integration CTest for keep-alive, max request cap, idle timeout, pipelining, chunked body, request-smuggling rejection, rate limiting, connection limits, timeout/slow-client behavior, WAF block paths for HTTP/1.1/WebSocket/WebSocket proxy/HTTP/2, range, gzip, WebSocket echo, and WebSocket proxy.
 - Parser unit test melalui CTest.
 - Handler pipeline unit test melalui CTest.
 - Response serializer unit test melalui CTest.
@@ -118,17 +121,16 @@ Partial:
 - HTTP/1.1 support is partial; file-backed large-body spooling, handler pull body reader, basic chunked response API, multipart range/`If-Range`, directory index config, and custom error page exist, but live in-flight request body dispatch, reverse proxy request/response streaming, producer-side async response backpressure, Brotli, full WebSocket application routing, and broad stress validation are not implemented.
 - Proxygen-inspired pipeline is partial; filter chain, async handler body streaming, and full protocol session adapters are not implemented.
 - SQLite config is partial; schema version table exists, but multi-step migration framework, admin UI, and config backup policy are not implemented. SIGHUP live reload is implemented only for restart-free dynamic values.
-- TLS is partial; production certificate lifecycle guidance exists, but issuance/renewal automation and OCSP stapling are not implemented. HTTP/2 ALPN `h2` request serving exists only as a partial basic path, not production-complete HTTP/2.
+- TLS is partial; production certificate lifecycle guidance exists, but issuance/renewal automation and OCSP stapling are not implemented. HTTP/2 ALPN `h2` request serving is implemented for the Phase 4 native baseline.
 - Virtual hosts are partial; exact host, simple wildcard, static roots, proxy rules, and script declarations exist, but rewrite rules and richer routing are not implemented.
-- Reverse proxy is partial; HTTP/HTTPS upstream, optional default-trust-path certificate verification, buffered normal HTTP response, WebSocket tunnel data path through worker `epoll`, basic hop-by-hop header stripping, basic round-robin, retry/failover, and passive circuit breaker exist. Per-upstream HTTPS verification policy, normal HTTP proxy streaming, advanced load balancing, active health checks, and upstream connection pooling are not implemented.
+- Reverse proxy is partial; HTTP/1.1 HTTP/HTTPS upstream I/O now runs through the worker `epoll` reactor, optional default-trust-path certificate verification, buffered normal HTTP response, WebSocket tunnel data path through worker `epoll`, basic hop-by-hop header stripping, `round_robin`/`failover`/`stable_hash` upstream selection, retry/failover, and passive circuit breaker exist. HTTP/2 reverse proxy dispatch still uses the shared handler path; per-upstream HTTPS verification policy, normal HTTP proxy streaming/backpressure, active health checks, and upstream connection pooling are not implemented.
 - ModSecurity/WAF is partial; a built-in ModSecurity-compatible anomaly-scoring WAF with OWASP CRS-inspired subset rules, basic per-host overrides, and structured redacted audit events exists, but full `libmodsecurity` and full OWASP Core Rule Set are not bundled or implemented. ADR-0034 defers full bundling beyond P1. Needs verification.
-- HTTP/2 and HTTP/3 support is partial: tested wire codec primitives exist, HTTP/2 has cleartext h2c and TLS ALPN `h2` request serving basics, and HTTP/3 remains wire-codec-only.
-- Server-side language support is planned only; PHP/Python/Perl runtime execution is not bundled or implemented.
+- HTTP/2 is implemented for the Phase 4 native h2c/TLS ALPN `h2` baseline; HTTP/3 remains partial wire-codec-only.
+- Server-side language support is partial/planned; script vhost declaration and non-execution contract are implemented, but PHP/Python/Perl/CGI/FastCGI runtime execution is not bundled or implemented.
 - Static glibc DNS/NSS hostname behavior for reverse proxy upstream hostnames still needs production validation because the static linker warns on `getaddrinfo` and OpenSSL `gethostbyname`. Needs verification.
 
 Planned:
 
-- HTTP/2 production-complete request serving, including full stream lifecycle, HPACK, continuation assembly, automated real-client testing, and flow control.
 - HTTP/3 full UDP/QUIC request serving.
 - HTTP/3 ALPN negotiation after HTTP/3 live serving is implemented.
 - Bundled server-side runtime execution. Needs verification.
@@ -151,17 +153,17 @@ Semasa pemeriksaan awal pada 2026-07-18:
 | Build system | Implemented | CMake with bundled static OpenSSL, SQLite, zlib, Bison, Linux UAPI headers, and glibc targets; `rimau-server` is fully static in current Linux x86_64 validation and covered by `rimau_static_elf_checks`. |
 | CLI | Partial | `--database`, `--set`, `--check-config`, `--protocols`, `--version`, `--help`. |
 | HTTP/1.1 | Partial | GET/HEAD static, POST/PUT/PATCH/DELETE JSON scaffold, OPTIONS, Content-Length, chunked decode, file-backed large-body spooling, pull request-body reader, basic chunked response API, keep-alive, basic pipelining, single/multipart range with `If-Range`, gzip, configurable directory index/custom error page, WebSocket echo, WebSocket reverse proxy tunnel, and extracted testable request framing. |
-| HTTP/2 | Partial | Frame codec, SETTINGS/PING basics, HPACK baseline, cleartext h2c and TLS ALPN `h2` HEADERS/DATA request serving through the shared handler pipeline exist; real-client TLS ALPN `h2` negotiation is covered with curl/nghttp2, but no production flow control, CONTINUATION assembly, HPACK Huffman, dynamic-table persistence, or full real-client request success yet. |
+| HTTP/2 | Implemented | Native h2c and TLS ALPN `h2` request serving through `ServerSession`; frame codec, SETTINGS/PING/RST/GOAWAY, HPACK Huffman/dynamic-table decode, CONTINUATION assembly, stream lifecycle basics, inbound flow-control accounting, shared handler dispatch, and successful real-client h2c/TLS curl tests exist. |
 | HTTP/3 | Partial | QUIC varint, frame codec, and SETTINGS codec exist; no UDP/QUIC/QPACK/live serving yet. |
-| TLS | Partial | HTTP/1.1 HTTPS and partial HTTP/2 ALPN `h2` via bundled static OpenSSL 4.0.1 with TLS 1.2/1.3, SNI validation, automated multi-certificate SNI selection coverage, ALPN `http/1.1`/`h2`, safe cipher config, SIGHUP context reload for new connections, and production certificate management guidance. OCSP stapling is not supported by ADR-0039. |
+| TLS | Partial | HTTP/1.1 HTTPS and HTTP/2 ALPN `h2` via bundled static OpenSSL 4.0.1 with TLS 1.2/1.3, SNI validation, automated multi-certificate SNI selection coverage, ALPN `http/1.1`/`h2`, safe cipher config, SIGHUP context reload for new connections, and production certificate management guidance. OCSP stapling is not supported by ADR-0039. |
 | Static files | Partial | Serves from `document_root`, supports configurable directory index/custom error page, MIME detection, gzip, single/multipart range, and `If-Range`; no zero-copy path yet. |
 | Virtual hosts | Partial | Exact host and simple `*.domain` matching, static vhost, proxy vhost, and script declarations. |
-| Reverse proxy | Partial | HTTP/HTTPS upstream, optional default-trust-path certificate verification, buffered normal HTTP response, WebSocket tunnel data path in worker `epoll`, basic round-robin, retry/failover, and passive circuit breaker; no per-upstream CA/pinning policy, active health checks, normal HTTP proxy streaming, or upstream connection pooling yet. |
-| Server-side runtimes | Planned | `script:runtime:path` config returns `501`; PHP/Python/Perl are not bundled or executed yet. |
+| Reverse proxy | Partial | HTTP/1.1 HTTP/HTTPS upstream connect/write/read runs in the worker `epoll` reactor, optional default-trust-path certificate verification, buffered normal HTTP response, WebSocket tunnel data path in worker `epoll`, SQLite `round_robin`/`failover`/`stable_hash` upstream selection, retry/failover, and passive circuit breaker; no HTTP/2 async proxy adapter, per-upstream CA/pinning policy, active health checks, normal HTTP proxy streaming/backpressure, or upstream connection pooling yet. |
+| Server-side runtimes | Partial | `script:runtime:path` config returns `501`; ADR-0044 documents the declaration-only safety baseline and tests prove fake system `php`/`python`/`perl` binaries in `PATH` are not invoked. PHP/Python/Perl/CGI/FastCGI execution is not bundled or implemented yet. |
 | Request pipeline | Partial | Handler/factory/transaction/response sink implemented for static, vhost, reverse proxy, and script-placeholder HTTP/1.1. |
 | Config | Partial | SQLite table `rimau_config`, schema metadata table `rimau_schema_migrations`, protocol, TLS, keep-alive, static file, timeout, rate-limit, IP-list, security-header, virtual-host/proxy keys, and limited SIGHUP reload behavior. |
 | Security | Partial | Baseline HTTP framing hardening, timeout, rate limit, connection limit, built-in ModSecurity-compatible WAF subset with per-host overrides and structured redacted audit events, configurable security header values, IPv4/IPv6 IP allow/block list, and deterministic parser/framing fuzz smoke are implemented; broader fuzzing and production hardening remain pending, while full ModSecurity/CRS integration is deferred beyond P1 by ADR-0034. |
-| Tests | Partial | Parser, HTTP/1.1 session/framing, deterministic HTTP parser/framing fuzz smoke, static ELF check, TLS ALPN `h2` real-client curl smoke, TLS SNI multi-certificate selection smoke, HTTP/1.1 network integration including request-smuggling rejection, rate limiting, connection limits, request/header/body/idle timeout slow-client behavior, WAF block paths for HTTP/1.1/WebSocket/WebSocket proxy/partial HTTP/2, WAF virtual-host override and audit-log redaction behavior, WAF false-positive corpus, response serializer, handler pipeline, SQLite config, CLI config, protocol capability, HTTP/2 wire, HTTP/3 wire, virtual host, and WAF tests. |
+| Tests | Partial | Parser, HTTP/1.1 session/framing, deterministic HTTP parser/framing fuzz smoke, static ELF check, TLS ALPN `h2` real-client curl test, TLS SNI multi-certificate selection smoke, HTTP/1.1 network integration including request-smuggling rejection, rate limiting, connection limits, request/header/body/idle timeout slow-client behavior, WAF block paths for HTTP/1.1/WebSocket/WebSocket proxy/HTTP/2, script-vhost no-shell-out checks, WAF virtual-host override and audit-log redaction behavior, WAF false-positive corpus, response serializer, handler pipeline, SQLite config, CLI config, protocol capability, HTTP/2 wire, HTTP/3 wire, virtual host, and WAF tests. |
 | Deployment | Planned | No production deployment files. |
 | Database | Partial | SQLite is used for runtime configuration only; the SQLite engine is bundled static and config schema version `1` is recorded. |
 | I/O model | Partial | Linux `epoll` reactor with per-worker event loops and SO_REUSEPORT implemented; benchmarks still pending. |
@@ -171,6 +173,8 @@ Semasa pemeriksaan awal pada 2026-07-18:
 Most recent completed on 2026-07-20:
 
 ```bash
+cmake --build build --target rimau-server
+ctest --test-dir build --output-on-failure -R rimau_http1_network
 cmake -S . -B build
 python3 -m py_compile tests/test_static_elf.py
 ctest --test-dir build --output-on-failure -R rimau_static_elf_checks
@@ -185,10 +189,12 @@ git diff --check
 
 Result:
 
+- Server target built after Phase 5 HTTP/1.1 reverse proxy async state-machine update.
+- HTTP/1.1 network integration test passed, 1/1, including the new single-worker slow-upstream regression proving a slow normal HTTP reverse proxy upstream does not block an unrelated static request.
 - CMake configure passed.
 - Python syntax check for `tests/test_static_elf.py` passed.
 - `rimau_static_elf_checks` passed, 1/1, for the default fully static build.
-- Full CTest passed, 16/16.
+- Full CTest passed, 16/16 at that validation point.
 - `rimau-server` target built.
 - Fast CI CMake configure with `RIMAU_FULLY_STATIC_SERVER=OFF` and `RIMAU_USE_BUNDLED_GLIBC=OFF` passed.
 - `rimau_static_elf_checks` in `build-ci` skipped as expected for the non-static fast-CI build.
@@ -222,7 +228,7 @@ Phase 3 TLS ALPN `h2` real-client smoke update:
 - Test starts a temporary TLS Rimau server, generates a self-signed test certificate with the bundled OpenSSL binary, runs `curl --http2`, and verifies real-client ALPN selection of `h2`.
 - Test skips only when `curl` is missing or does not report HTTP2 support.
 - Test accepts both curl 8-style `using HTTP/2`/`[HTTP/2]` verbose output and curl 7.81-style `Using HTTP2`/`Connection state changed (HTTP/2 confirmed)` output.
-- Current test accepts the known partial HTTP/2 HPACK Huffman `COMPRESSION_ERROR` request path, so this validates ALPN negotiation only; full curl/nghttp2 HTTP/2 request success remains pending.
+- Phase 4 later tightened this test to require successful response body fetch after HPACK Huffman/dynamic-table decode was implemented.
 - Added ADR-0037 and marked the Phase 3 ordered checklist item complete.
 
 Phase 2 structured WAF audit log update:
@@ -1021,7 +1027,7 @@ HTTP/2 h2c request-serving update:
 - Complete h2c streams are dispatched through the existing `Transaction` and `VirtualHostHandlerFactory` pipeline.
 - HTTP/2 responses are serialized as HEADERS and DATA frames.
 - h2c-only startup is allowed when `http1_enabled=false`, `http2_enabled=true`, and `tls_enabled=false`.
-- Protocol status text now reports HTTP/2 as partial h2c request serving instead of handshake-only behavior.
+- Protocol status text now reports HTTP/2 as h2c request serving instead of handshake-only behavior.
 
 Known limits from this update:
 
@@ -1081,7 +1087,7 @@ HTTP/2 TLS ALPN `h2` request-serving update:
 
 - SQLite config validation now allows `tls_alpn_protocols` to contain `h2` when HTTP/2 is enabled for TLS serving, and still rejects `h3` until HTTP/3 live serving exists.
 - TLS connection state records the selected ALPN protocol after `SSL_accept`.
-- When TLS ALPN selects `h2`, `ClientConnection` requires the HTTP/2 client connection preface and enters the same partial HTTP/2 request-serving path used by h2c.
+- When TLS ALPN selects `h2`, `ClientConnection` requires the HTTP/2 client connection preface and enters the same HTTP/2 request-serving path used by h2c.
 - TLS ALPN `h2` request serving handles client preface + SETTINGS, replies SETTINGS + SETTINGS ACK, decodes HEADERS/DATA with the HPACK baseline, dispatches complete streams through `Transaction` and `VirtualHostHandlerFactory`, and writes HTTP/2 HEADERS/DATA response frames.
 - If a TLS client negotiates `h2` but sends non-HTTP/2 bytes, Rimau sends an HTTP/2 GOAWAY protocol error instead of parsing it as HTTP/1.1.
 - Startup now permits HTTP/2-only TLS serving when `http1_enabled=false`, `http2_enabled=true`, `tls_enabled=true`, and `tls_alpn_protocols` includes `h2`.
@@ -1466,7 +1472,7 @@ HTTP/1.1 P1 stabilization completion update:
 - Updated the scaffold JSON method handler to read body preview through `RequestBodyReader`.
 - Added static file multipart byte-range responses and `If-Range` handling using generated strong ETag and Last-Modified validators.
 - Added static `directory_index` and optional `error_page` SQLite config keys.
-- Wired static file options through `StaticFileHandler`, `StaticFileHandlerFactory`, `VirtualHostHandlerFactory`, HTTP/1.1 dispatch, and partial HTTP/2 dispatch.
+- Wired static file options through `StaticFileHandler`, `StaticFileHandlerFactory`, `VirtualHostHandlerFactory`, HTTP/1.1 dispatch, and HTTP/2 dispatch.
 - Added unit and network coverage for request body reader, multipart range, `If-Range`, config keys, directory index, and custom error page.
 - Accepted the P1 Brotli decision to defer Brotli until a bundled dependency is explicitly selected and pinned.
 - Marked all Phase 1 HTTP/1.1 stabilization items complete in `docs/plans/021-ordered-update-checklist.md`.
@@ -1584,7 +1590,7 @@ Phase 2 per-virtual-host WAF override update:
 - Added parser and host selection for exact and simple wildcard WAF override host patterns.
 - Added WAF settings overrides for `enabled`, `owasp_crs`, `blocking`, `threshold`, and numeric `rule_exceptions`.
 - Added WAF engine support for disabled built-in rule ids.
-- Wired per-host WAF settings into the shared WAF inspection path used by HTTP/1.1, WebSocket upgrade, WebSocket reverse proxy upgrade, and partial HTTP/2 dispatch.
+- Wired per-host WAF settings into the shared WAF inspection path used by HTTP/1.1, WebSocket upgrade, WebSocket reverse proxy upgrade, and HTTP/2 dispatch.
 - Added unit coverage for config database loading/validation, virtual host override parsing/application, and WAF rule exceptions.
 - Added HTTP/1.1 network integration coverage showing scanner traffic is blocked by default but allowed for hosts with `enabled:false`, `rule_exceptions:913100`, or a higher threshold.
 - Marked the Phase 2 per-virtual-host WAF controls checklist item complete in `docs/plans/021-ordered-update-checklist.md`.
@@ -1630,3 +1636,177 @@ Result:
 - `rimau-http-fuzz-tests` target built.
 - `rimau_http_fuzz` passed, 1/1.
 - Full CTest passed, 13/13.
+
+Phase 4 native HTTP/2 session path update:
+
+- Added ADR-0040 to continue P4 as native Rimau HTTP/2 server implementation with no bundled/copied/linked external HTTP/2 server implementation code.
+- Added `include/rimau/protocol/http2_session.hpp` and `src/protocol/http2_session.cpp` as an incremental native `rimau::protocol::http2::ServerSession` module.
+- The new module covers HTTP/2 preface acceptance/rejection, SETTINGS/PING/RST/GOAWAY handling basics, HEADERS/DATA completion into `rimau::http::Request`, stream reset output, and HTTP/2 response serialization using Rimau's existing frame/HPACK primitives.
+- Added CTest target `rimau_http2_session` through `tests/test_http2_session.cpp`.
+- This was the initial extraction step; the later Phase 4 completion update wires live `ClientConnection` HTTP/2 processing into `ServerSession`.
+
+Validation on 2026-07-20 after native HTTP/2 session module start:
+
+```bash
+cmake -S . -B build
+cmake --build build --target rimau-http2-session-tests
+ctest --test-dir build --output-on-failure -R rimau_http2_session
+cmake --build build
+ctest --test-dir build --output-on-failure
+./build/rimau-server --check-config
+./build/rimau-server --protocols
+git diff --check
+```
+
+Result:
+
+- CMake configure passed.
+- `rimau-http2-session-tests` target built.
+- `rimau_http2_session` passed, 1/1 test.
+- Full build passed; existing static glibc DNS/NSS linker warnings for `getaddrinfo` and OpenSSL `gethostbyname` remain.
+- Full CTest passed, 17/17 tests at that validation point.
+- Default config check passed.
+- Protocol status command passed.
+- Diff whitespace check passed.
+
+Phase 4 HTTP/2 completion update:
+
+- Completed the native Rimau HTTP/2 P4 path without bundling, copying, or linking external HTTP/2 server implementation code.
+- Wired live h2c and TLS ALPN `h2` frame processing in `ClientConnection` to `rimau::protocol::http2::ServerSession`.
+- Added HPACK Huffman string decoding using the RFC 7541 static Huffman table and added stateful `HpackDecoder` support for dynamic table insert/reference and dynamic table size updates.
+- Added HTTP/2 CONTINUATION assembly with safe `max_request_bytes` bounds and protocol-error handling when another frame interrupts a header block.
+- Added stream lifecycle basics for open and half-closed-remote streams, reset handling, closed-stream protection, and request completion through the shared `Transaction` pipeline.
+- Added inbound DATA flow-control accounting with connection/stream WINDOW_UPDATE output after buffered consumption; outbound response flow-control scheduling remains future streaming/backpressure hardening.
+- Added CTest `rimau_http2_h2c_curl` using `curl --http2-prior-knowledge` and tightened `rimau_tls_alpn_h2_curl` so TLS ALPN `h2` must fetch the expected response body.
+- Updated `--protocols` so HTTP/2 reports `implemented` for the native P4 baseline.
+- Added ADR-0041 and marked every Phase 4 checklist item complete.
+
+Validation on 2026-07-20 after Phase 4 HTTP/2 completion:
+
+```bash
+cmake -S . -B build
+cmake --build build --target rimau-server
+python3 -m py_compile tests/test_http2_h2c_curl.py tests/test_tls_alpn_h2_curl.py
+ctest --test-dir build --output-on-failure -R "rimau_http2_(wire|session)"
+ctest --test-dir build --output-on-failure -R "rimau_protocol_capabilities|rimau_http2_h2c_curl|rimau_tls_alpn_h2_curl"
+ctest --test-dir build --output-on-failure
+./build/rimau-server --check-config
+./build/rimau-server --database data/rimau.sqlite3 --check-config
+./build/rimau-server --protocols
+./build/rimau-server --database data/rimau.sqlite3 --protocols
+ldd build/rimau-server || true
+file build/rimau-server
+readelf -l build/rimau-server | rg 'INTERP|Requesting program interpreter' || true
+git diff --check
+```
+
+Result:
+
+- CMake configure passed.
+- `rimau-server` target built; existing static glibc DNS/NSS linker warnings for `getaddrinfo` and OpenSSL `gethostbyname` remain.
+- Python syntax checks passed.
+- HTTP/2 wire/session tests passed, 2/2.
+- Protocol capability, real-client h2c curl, and real-client TLS ALPN `h2` curl tests passed, 3/3.
+- Full CTest passed, 18/18.
+- Default and `data/rimau.sqlite3` config/protocol checks passed.
+- Static ELF checks passed: `ldd` reports not dynamic, `file` reports static ELF, and `readelf` found no interpreter.
+- Diff whitespace check passed.
+
+Phase 5 reverse proxy load-balancing policy update:
+
+- Added SQLite config key `reverse_proxy_load_balancing_policy` with accepted values `round_robin`, `failover`, and `stable_hash`.
+- Added shared reverse proxy upstream ordering helper for normal HTTP proxy and WebSocket proxy setup.
+- Kept `round_robin` as the default behavior.
+- Added `failover` policy to always start with the configured first upstream and try later upstreams only when needed.
+- Added `stable_hash` policy using request `Host` plus target as a deterministic start key.
+- Added ADR-0042 and marked the Phase 5 advanced load-balancing checklist item complete.
+- Normal HTTP reverse proxy remained buffered and still used handler-level `poll()`/`getaddrinfo` at this checkpoint; the later Phase 5 async HTTP/1.1 proxy update moved HTTP/1.1 upstream I/O into the worker reactor.
+
+Validation on 2026-07-20 after Phase 5 load-balancing policy update:
+
+```bash
+python3 -m py_compile tests/test_http1_network.py
+cmake --build build --target rimau-config-database-tests rimau-virtual-host-tests rimau-server
+ctest --test-dir build --output-on-failure -R "rimau_(config_database|virtual_host|cli_config|http1_network)"
+cmake --build build --target rimau-config-database-tests rimau-virtual-host-tests rimau-protocol-capabilities-tests rimau-server
+ctest --test-dir build --output-on-failure -R "rimau_(config_database|virtual_host|protocol_capabilities|cli_config)"
+./build/rimau-server --protocols
+ctest --test-dir build --output-on-failure
+./build/rimau-server --check-config
+./build/rimau-server --database data/rimau.sqlite3 --check-config
+./build/rimau-server --database data/rimau.sqlite3 --protocols
+git diff --check
+```
+
+Result:
+
+- Python syntax check passed.
+- Relevant targets built; existing static glibc DNS/NSS linker warnings for `getaddrinfo` and OpenSSL `gethostbyname` remain.
+- Config database, virtual host, CLI config, and HTTP/1.1 network integration tests passed, 4/4.
+- Protocol capability tests passed after updating `--protocols` HTTP/1.1 notes.
+- Protocol status command passed and reports configurable reverse proxy upstream selection policies.
+- Full CTest passed, 18/18.
+- Default and `data/rimau.sqlite3` config/protocol checks passed.
+- Diff whitespace check passed.
+
+P2 server-side runtime safety baseline update:
+
+- Accepted ADR-0044: `script:runtime:path` remains declaration-only until a runtime-specific ADR accepts bundled runtime, embedded VM, or explicitly external CGI/FastCGI behavior.
+- Documented the current non-execution contract in `docs/plans/023-server-side-runtime-support.md`.
+- Confirmed current script vhost behavior: `501 Not Implemented`, `x-rimau-runtime-status: planned`, JSON body with `implemented=false`.
+- Added HTTP/1.1 network regression coverage that places fake `php`, `python`, and `perl` executables first in `PATH`, requests matching script vhosts, and verifies those executables are not invoked.
+- Marked runtime model decision and no-shell-out regression coverage complete in the ordered checklist.
+- Real PHP/Python/Perl/CGI/FastCGI execution remains planned only.
+
+Validation on 2026-07-20 after P2 server-side runtime safety baseline update:
+
+```bash
+python3 -m py_compile tests/test_http1_network.py
+ctest --test-dir build --output-on-failure -R rimau_http1_network
+ctest --test-dir build --output-on-failure -R rimau_virtual_host
+git diff --check
+```
+
+Result:
+
+- Python syntax check for `tests/test_http1_network.py` passed.
+- HTTP/1.1 network integration test passed, 1/1, including script-vhost no-shell-out checks for fake `php`, `python`, and `perl`.
+- Virtual host unit test passed, 1/1.
+- Diff whitespace check passed.
+
+Phase 5 HTTP/1.1 reverse proxy async upstream I/O update:
+
+- Added an HTTP/1.1 reverse proxy state machine in `ClientConnection`.
+- Reverse proxy vhost requests are now intercepted after rate-limit and WAF checks, before the shared `VirtualHostHandlerFactory` dispatch.
+- Upstream TCP connect, optional HTTPS upstream TLS handshake, upstream request write, and upstream response read now progress through the same worker `epoll` reactor as client I/O.
+- Existing upstream ordering, retry/failover, passive circuit breaker, and optional default-trust-path TLS verification remain in use.
+- Normal HTTP reverse proxy response handling is still buffered and parsed after upstream close; request/response streaming and producer-side backpressure remain pending.
+- HTTP/2 reverse proxy dispatch still uses the shared handler path instead of this HTTP/1.1 async proxy state machine.
+- WebSocket proxy data tunneling remains epoll-based after handshake, but DNS/connect/TLS/handshake setup still happens before tunnel mode.
+- Added ADR-0043.
+- Added HTTP/1.1 network regression coverage with `worker_threads=1`: a slow normal proxy upstream no longer blocks an unrelated static request handled by the same worker.
+
+Validation on 2026-07-20 after Phase 5 HTTP/1.1 reverse proxy async upstream I/O update:
+
+```bash
+cmake --build build --target rimau-server
+ctest --test-dir build --output-on-failure -R rimau_http1_network
+python3 -m py_compile tests/test_http1_network.py
+ctest --test-dir build --output-on-failure -R "rimau_(virtual_host|http1_network)"
+ctest --test-dir build --output-on-failure
+./build/rimau-server --check-config
+./build/rimau-server --database data/rimau.sqlite3 --check-config
+./build/rimau-server --protocols
+./build/rimau-server --database data/rimau.sqlite3 --protocols
+git diff --check
+```
+
+Result:
+
+- `rimau-server` target built; existing static glibc DNS/NSS linker warnings for `getaddrinfo` and OpenSSL `gethostbyname` remain.
+- HTTP/1.1 network integration test passed, 1/1.
+- Python syntax check for `tests/test_http1_network.py` passed.
+- Virtual host and HTTP/1.1 network integration tests passed, 2/2.
+- Full CTest passed, 18/18.
+- Default and `data/rimau.sqlite3` config/protocol checks passed.
+- Diff whitespace check passed.

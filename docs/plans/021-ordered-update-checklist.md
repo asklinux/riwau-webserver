@@ -62,9 +62,9 @@ Untuk setiap item:
 - [x] Tambah integration tests rate limit, connection limit, timeout, dan slow-client behavior.
   - Done criteria: behavior keselamatan runtime terbukti end-to-end.
   - Status: HTTP/1.1 network integration now covers fixed-window rate limiting, per-IP and global connection limit rejection, and request/header/body/idle timeout slow-client behavior using SQLite-configured limits.
-- [x] Tambah WAF integration tests untuk HTTP/1.1, WebSocket upgrade, WebSocket proxy upgrade, dan partial HTTP/2.
+- [x] Tambah WAF integration tests untuk HTTP/1.1, WebSocket upgrade, WebSocket proxy upgrade, dan HTTP/2.
   - Done criteria: WAF block path diuji di semua entry point.
-  - Status: HTTP/1.1 network integration now enables the built-in WAF and verifies blocking for normal HTTP/1.1, local WebSocket upgrade, WebSocket proxy vhost upgrade, and partial h2c request-serving paths.
+  - Status: HTTP/1.1 network integration now enables the built-in WAF and verifies blocking for normal HTTP/1.1, local WebSocket upgrade, WebSocket proxy vhost upgrade, and h2c request-serving paths.
 - [x] Bina WAF false-positive regression corpus.
   - Done criteria: traffic normal browser/curl tidak diblock oleh rule default.
   - Status: `rimau_waf` now includes a structured false-positive corpus for normal curl, browser navigation/static asset, search, JSON API, form, and WebSocket upgrade traffic; each case must stay allowed with no WAF matches under default blocking WAF settings.
@@ -85,7 +85,7 @@ Untuk setiap item:
 
 - [x] Tambah automated TLS ALPN `h2` test dengan real HTTP/2 client.
   - Done criteria: bukan hanya Python raw-frame smoke.
-  - Status: Added CTest `rimau_tls_alpn_h2_curl` via `tests/test_tls_alpn_h2_curl.py`; it starts temporary TLS Rimau config, uses bundled OpenSSL for a dev cert, runs `curl --http2`, and verifies real-client ALPN selection of `h2`. Current test accepts the known partial HTTP/2 HPACK Huffman `COMPRESSION_ERROR` path, so full real-client HTTP/2 request success remains Phase 4 work.
+  - Status: Added CTest `rimau_tls_alpn_h2_curl` via `tests/test_tls_alpn_h2_curl.py`; it starts temporary TLS Rimau config, uses bundled OpenSSL for a dev cert, runs `curl --http2`, and verifies real-client ALPN selection of `h2`. Phase 4 later tightened this test so it must fetch the expected response body.
 - [x] Tambah automated multi-certificate SNI selection test.
   - Done criteria: cert dipilih mengikut host exact/wildcard.
   - Status: Added CTest `rimau_tls_sni_cert_selection` via `tests/test_tls_sni_cert_selection.py`; it generates default, exact-host, and wildcard-host certificates with bundled OpenSSL, starts a temporary TLS Rimau server, then uses bundled `openssl s_client`/`x509` fingerprints to verify default fallback, exact `api.example.test`, and wildcard `app.tenant.test` certificate selection.
@@ -101,33 +101,42 @@ Untuk setiap item:
 
 ## Phase 4: HTTP/2 Production Path
 
-- [ ] Decide native HTTP/2 penuh atau bundled `nghttp2`.
+- [x] Decide native HTTP/2 penuh atau bundled `nghttp2`.
   - Done criteria: ADR accepted dengan source/version/SHA/license/update policy jika bundling.
-- [ ] Pindahkan HTTP/2 logic dari `ClientConnection` ke session module khusus.
+  - Status: ADR-0040 accepted the native Rimau HTTP/2 production path. Do not bundle, copy, or link external HTTP/2 server implementation code for P4; `nghttp2` remains allowed only indirectly as a real-client test stack through tools such as system `curl --http2`.
+- [x] Pindahkan HTTP/2 logic dari `ClientConnection` ke session module khusus.
   - Done criteria: HTTP/2 state machine tidak lagi inline besar dalam server core.
-- [ ] Implement complete stream lifecycle.
+  - Status: Live h2c/TLS ALPN `h2` frame processing now delegates to native `rimau::protocol::http2::ServerSession`; old inline helpers are retained only as legacy code until a later cleanup pass.
+- [x] Implement complete stream lifecycle.
   - Done criteria: stream open/half-closed/closed dan reset diuji.
-- [ ] Implement CONTINUATION assembly.
+  - Status: `ServerSession` tracks open/half-closed-remote stream state, handles stream reset/closed-stream paths, and completes streams through request translation tests.
+- [x] Implement CONTINUATION assembly.
   - Done criteria: header block multi-frame diterima dengan limit yang selamat.
-- [ ] Complete HPACK Huffman dan dynamic table atau gantikan dengan library.
+  - Status: HEADERS without `END_HEADERS` are assembled with CONTINUATION frames and bounded by `max_request_bytes`; protocol error is raised if another frame interrupts the sequence.
+- [x] Complete HPACK Huffman dan dynamic table atau gantikan dengan library.
   - Done criteria: real-client HTTP/2 headers umum boleh diproses.
-- [ ] Implement flow control.
+  - Status: Native `HpackDecoder` now decodes RFC HPACK Huffman strings, dynamic table insert/reference, and dynamic table size updates; real curl/nghttp2 request headers are accepted.
+- [x] Implement flow control.
   - Done criteria: DATA large body/response tidak melanggar window semantics.
-- [ ] Tambah real-client h2c dan TLS `h2` integration tests.
+  - Status: Inbound DATA consumes and restores connection/stream windows with WINDOW_UPDATE output and rejects window overflow; outbound response flow-control scheduling remains a future streaming/backpressure hardening item.
+- [x] Tambah real-client h2c dan TLS `h2` integration tests.
   - Done criteria: curl/nghttp/httpx client berjaya dalam test automatik. Needs verification untuk tool pilihan.
+  - Status: Added CTest `rimau_http2_h2c_curl` with `curl --http2-prior-knowledge`; tightened `rimau_tls_alpn_h2_curl` so `curl --http2` must fetch the expected response body instead of accepting the old HPACK `COMPRESSION_ERROR` path.
 
 ## Phase 5: Reverse Proxy Production Path
 
 - [ ] Pindahkan normal HTTP reverse proxy upstream I/O ke worker reactor atau async upstream state machine.
   - Done criteria: tiada `poll()` blocking di handler normal proxy path.
+  - Status: Partial. HTTP/1.1 reverse proxy vhost requests now use a `ClientConnection` state machine for upstream TCP connect, optional HTTPS TLS handshake, request write, and response read through worker `epoll`; a single-worker slow-upstream regression test verifies unrelated static requests are not blocked. HTTP/2 reverse proxy dispatch still uses the shared handler path, request/response bodies remain buffered, DNS still uses blocking `getaddrinfo`, and WebSocket proxy setup still performs connect/TLS/handshake before tunnel mode.
 - [ ] Implement reverse proxy request/response streaming dan backpressure.
   - Done criteria: upstream/downstream large body tidak buffer penuh dalam memori.
 - [ ] Tambah upstream connection pooling.
   - Done criteria: keep-alive upstream boleh reuse connection dengan limit dan cleanup.
 - [ ] Tambah active health checks.
   - Done criteria: upstream health status boleh dilihat/test tanpa tunggu request fail.
-- [ ] Tambah advanced load balancing policy.
+- [x] Tambah advanced load balancing policy.
   - Done criteria: at least round-robin, failover, dan satu policy tambahan jelas diuji.
+  - Status: Added SQLite `reverse_proxy_load_balancing_policy` with `round_robin`, `failover`, and `stable_hash`; normal HTTP proxy and WebSocket proxy upstream ordering share the same helper, with config/unit tests and HTTP/1.1 network failover-policy coverage.
 - [ ] Tambah per-upstream TLS CA/pinning/verify-depth policy.
   - Done criteria: verification boleh dikawal per upstream dari SQLite.
 - [ ] Validate static glibc DNS/NSS hostname behavior.
@@ -150,16 +159,21 @@ Untuk setiap item:
 
 ## Phase 7: Server-Side Runtime Support
 
-- [ ] Decide runtime model: bundled PHP/Python/Perl, embedded VM kecil, CGI/FastCGI optional, atau kombinasi.
+- [x] Decide runtime model: bundled PHP/Python/Perl, embedded VM kecil, CGI/FastCGI optional, atau kombinasi.
   - Done criteria: ADR accepted dengan security model.
+  - Status: ADR-0044 accepts a P2 safety baseline: script vhosts stay declaration-only and return `501`; Rimau must not shell out to system `php`, `python`, `perl`, or any other interpreter. Bundled runtime, embedded VM, CGI, or FastCGI execution still requires a future runtime-specific ADR.
 - [ ] Jika bundle PHP, pin source/version/SHA/license/build flags.
   - Done criteria: PHP route tidak shell out ke system `php`.
 - [ ] Jika bundle Python, pin source/version/SHA/embed model.
   - Done criteria: Python route tidak bergantung kepada interpreter sistem.
 - [ ] Jika bundle Perl, pin source/version/SHA/embed model.
   - Done criteria: Perl route tidak bergantung kepada interpreter sistem.
-- [ ] Define script vhost contract.
+- [x] Define script vhost contract.
   - Done criteria: entrypoint, env vars, body streaming, timeout, memory limit, dan isolation documented/tested.
+  - Status: Current non-execution contract documented in `docs/plans/023-server-side-runtime-support.md`: entrypoint discovery, env vars, body streaming, runtime timeout, memory limits, and isolation are explicitly not implemented; stable behavior is `501` plus `x-rimau-runtime-status: planned`.
+- [x] Add no-shell-out regression tests.
+  - Done criteria: fake system `php`, `python`, and `perl` placed first in `PATH` are not invoked by script vhost requests.
+  - Status: `tests/test_http1_network.py` verifies `script:php`, `script:python`, and `script:perl` return `501` and do not execute fake system runtime binaries.
 - [ ] Implement script runtime execution.
   - Done criteria: `script:runtime:path` tidak lagi `501` untuk runtime yang benar-benar siap.
 

@@ -2,7 +2,7 @@
 
 Rimau Web Server ialah projek C++ untuk membina web server berprestasi tinggi dengan sasaran jangka panjang setanding kelas OpenLiteSpeed dan nginx.
 
-Status semasa: scaffold awal yang sudah mempunyai HTTP/1.1 praktikal. HTTP/1.1 menyokong GET/HEAD static serving, OPTIONS, POST/PUT/PATCH/DELETE JSON scaffold, Content-Length, chunked request decoding, keep-alive, basic pipelining, single/multipart range responses, gzip static compression, basic WebSocket echo, WebSocket reverse proxy tunneling untuk proxy vhost, TLS hardening asas, timeout, rate limit, kawalan connection/IP, built-in ModSecurity-compatible WAF subset dengan per-host overrides, virtual host static, dan reverse proxy baseline dengan HTTP/HTTPS upstream, multi-upstream round-robin asas, retry/failover asas, dan passive circuit breaker. HTTP/2 kini partial: frame codec, SETTINGS/PING, HPACK asas tanpa Huffman, decode literal incremental indexing tanpa dynamic-table persistence, cleartext h2c prior-knowledge request serving, dan TLS ALPN `h2` request serving asas melalui shared handler pipeline sudah ada. Flow control penuh, continuation assembly, dan production-grade stream/session behavior belum siap. HTTP/3 kini partial pada codec primitive: QUIC varint, frame, dan SETTINGS payload parser/serializer sudah ada, tetapi UDP/QUIC/QPACK/live request serving belum siap.
+Status semasa: scaffold awal yang sudah mempunyai HTTP/1.1 praktikal. HTTP/1.1 menyokong GET/HEAD static serving, OPTIONS, POST/PUT/PATCH/DELETE JSON scaffold, Content-Length, chunked request decoding, keep-alive, basic pipelining, single/multipart range responses, gzip static compression, basic WebSocket echo, WebSocket reverse proxy tunneling untuk proxy vhost, TLS hardening asas, timeout, rate limit, kawalan connection/IP, built-in ModSecurity-compatible WAF subset dengan per-host overrides, virtual host static, dan reverse proxy HTTP/1.1 buffered dengan HTTP/HTTPS upstream I/O melalui worker `epoll`, multi-upstream `round_robin`/`failover`/`stable_hash`, retry/failover asas, dan passive circuit breaker. HTTP/2 kini implemented untuk native cleartext h2c prior-knowledge dan TLS ALPN `h2` request serving melalui shared handler pipeline, dengan HPACK Huffman/dynamic-table decode, CONTINUATION assembly, stream lifecycle asas, inbound flow-control accounting, dan real-client curl tests. HTTP/3 kini partial pada codec primitive: QUIC varint, frame, dan SETTINGS payload parser/serializer sudah ada, tetapi UDP/QUIC/QPACK/live request serving belum siap.
 
 Seni bina request pipeline mengambil inspirasi konsep daripada Proxygen, tetapi kod Proxygen tidak disalin ke projek ini.
 
@@ -13,7 +13,7 @@ Runtime server menggunakan Linux `epoll` reactor dengan worker thread berdasarka
 
 HTTP/1.1 keep-alive disokong untuk request dengan framing header-only, `Content-Length`, atau `Transfer-Encoding: chunked`. SIGHUP boleh reload nilai SQLite tertentu seperti `document_root`, request size limit, keep-alive settings, timeout, rate limit, IP list, virtual host/proxy settings, TCP keepalive settings untuk connection baru, protocol status flags, TLS certificate/key/settings untuk connection baru, dan graceful shutdown timeout tanpa restart proses.
 
-TLS/SSL dibina terus ke Rimau melalui bundled static OpenSSL. CMake memuat turun dan membina OpenSSL khusus untuk Rimau; runtime tidak link kepada `libssl` atau `libcrypto` sistem. TLS semasa menyokong TLS 1.2/1.3, SNI validation, multi-certificate SNI selection, ALPN `http/1.1` dan partial `h2`, configurable cipher list/ciphersuites, reload certificate/key untuk sambungan baharu, dan production certificate management guide. OCSP stapling tidak disokong setakat ini.
+TLS/SSL dibina terus ke Rimau melalui bundled static OpenSSL. CMake memuat turun dan membina OpenSSL khusus untuk Rimau; runtime tidak link kepada `libssl` atau `libcrypto` sistem. TLS semasa menyokong TLS 1.2/1.3, SNI validation, multi-certificate SNI selection, ALPN `http/1.1` dan `h2`, configurable cipher list/ciphersuites, reload certificate/key untuk sambungan baharu, dan production certificate management guide. OCSP stapling tidak disokong setakat ini.
 
 Gzip response compression menggunakan bundled static zlib 1.3.2; runtime tidak link kepada `libz` sistem.
 
@@ -31,15 +31,15 @@ Pada Linux x86_64 dengan GNU/Clang, CMake membina GNU glibc 2.43 daripada source
 - Security controls termasuk request/header/body/idle timeout, global/per-IP connection limit, fixed-window per-IP rate limit, built-in ModSecurity-compatible WAF subset, IPv4/IPv6 exact/CIDR allowlist/blocklist, SQLite-configurable security header values, dan `server_header_enabled=false`.
 - WAF semasa ialah subset OWASP CRS-inspired yang dikompil dalam kod Rimau untuk scanner user-agent, request splitting/CRLF, path traversal, XSS, SQLi, RCE, PHP wrapper injection, dan Java/JNDI exploit patterns. Ini bukan full `libmodsecurity` dan bukan full OWASP Core Rule Set.
 - Virtual host memilih handler melalui HTTP `Host` header dengan exact host dan wildcard ringkas `*.domain`.
-- Reverse proxy semasa menyokong upstream `http://` dan `https://`, membaca response HTTP biasa secara buffered, WebSocket proxy tunnel dua hala, dan mempunyai multi-upstream round-robin asas, retry/failover asas, serta passive circuit breaker. Ia belum mempunyai certificate verification policy production-ready, active health check scheduler, streaming request/response HTTP biasa, atau connection pooling.
-- Route server-side script boleh dideklarasi seperti `app.test=script:php:public/app`, tetapi runtime PHP/Python/Perl belum dibundle dan belum dieksekusi. Handler semasa pulang `501 Not Implemented` dengan `x-rimau-runtime-status: planned`.
+- Reverse proxy semasa menyokong upstream `http://` dan `https://`, membaca response HTTP biasa secara buffered, menjalankan HTTP/1.1 normal upstream I/O melalui worker `epoll`, WebSocket proxy tunnel dua hala, dan mempunyai multi-upstream `round_robin`, `failover`, atau `stable_hash`, retry/failover asas, serta passive circuit breaker. Ia belum mempunyai HTTP/2 async proxy adapter, certificate verification policy production-ready, active health check scheduler, streaming request/response HTTP biasa, atau connection pooling.
+- Route server-side script boleh dideklarasi seperti `app.test=script:php:public/app`, tetapi runtime PHP/Python/Perl belum dibundle dan belum dieksekusi. Handler semasa pulang `501 Not Implemented` dengan `x-rimau-runtime-status: planned`, dan Rimau tidak shell out kepada interpreter sistem.
 
 ## HTTP/2 And HTTP/3 Notes
 
-- HTTP/2 frame parser/serializer menyokong header 9-byte, frame length, type, flags, stream id, SETTINGS payload, dan validasi asas untuk SETTINGS, PING, GOAWAY, WINDOW_UPDATE, RST_STREAM, DATA, HEADERS, dan CONTINUATION.
-- HPACK HTTP/2 semasa menyokong static table, literal string tanpa Huffman, dan decode literal incremental indexing tanpa menyimpan dynamic table. Dynamic table reference, Huffman decoding, full flow control, priority, dan continuation assembly belum implemented.
-- Jika `http2_enabled=true`, cleartext h2c prior-knowledge dan TLS ALPN `h2` client preface boleh diproses: Rimau parse client SETTINGS, balas SETTINGS/ACK, parse HEADERS/DATA non-Huffman, dispatch ke pipeline `Transaction`, dan serialize response sebagai HTTP/2 HEADERS/DATA frame.
-- CTest `rimau_tls_alpn_h2_curl` menggunakan `curl --http2` sebagai real HTTP/2 client untuk mengesahkan TLS ALPN memilih `h2`. Ia belum membuktikan full curl request success kerana HPACK Huffman masih belum implemented.
+- HTTP/2 frame parser/serializer menyokong header 9-byte, frame length, type, flags, stream id, SETTINGS payload, dan validasi untuk SETTINGS, PING, GOAWAY, WINDOW_UPDATE, RST_STREAM, DATA, HEADERS, dan CONTINUATION.
+- HPACK HTTP/2 menyokong static table, Huffman string decode, dynamic table insert/reference, dan dynamic table size update.
+- Jika `http2_enabled=true`, cleartext h2c prior-knowledge dan TLS ALPN `h2` client preface diproses melalui native `ServerSession`: Rimau parse client SETTINGS, balas SETTINGS/ACK, parse HEADERS/CONTINUATION/DATA, dispatch ke pipeline `Transaction`, dan serialize response sebagai HTTP/2 HEADERS/DATA frame.
+- CTest `rimau_http2_h2c_curl` dan `rimau_tls_alpn_h2_curl` menggunakan real `curl` HTTP/2 client untuk mengesahkan h2c dan TLS ALPN `h2` boleh fetch response sebenar.
 - HTTP/3 codec primitive menyokong QUIC varint, frame parser/serializer, dan SETTINGS payload. Ini belum termasuk UDP listener, QUIC transport, TLS 1.3 QUIC handshake, QPACK, stream lifecycle, atau request adapter.
 - ALPN boleh mengiklankan `http/1.1` dan `h2` apabila `http2_enabled=true` serta `tls_alpn_protocols` mengandungi `h2`. `h3` masih ditolak dalam config sehingga HTTP/3 request serving siap dan diuji.
 
@@ -51,6 +51,7 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ctest --test-dir build --output-on-failure -R rimau_http_fuzz
 ctest --test-dir build --output-on-failure -R rimau_static_elf_checks
+ctest --test-dir build --output-on-failure -R rimau_http2_h2c_curl
 ctest --test-dir build --output-on-failure -R rimau_tls_alpn_h2_curl
 ctest --test-dir build --output-on-failure -R rimau_tls_sni_cert_selection
 ```
@@ -143,7 +144,7 @@ Contoh ubah config:
 ./build/rimau-server --database data/rimau.sqlite3 --set tls_min_version=TLSv1.2
 ./build/rimau-server --database data/rimau.sqlite3 --set tls_max_version=TLSv1.3
 ./build/rimau-server --database data/rimau.sqlite3 --set tls_alpn_protocols=http/1.1
-# Untuk partial TLS HTTP/2: set http2_enabled=true dan tls_alpn_protocols=h2,http/1.1
+# Untuk TLS HTTP/2: set http2_enabled=true dan tls_alpn_protocols=h2,http/1.1
 ./build/rimau-server --database data/rimau.sqlite3 --set "tls_sni_certificates=api.example.test=certs/api.crt|certs/api.key;*.tenant.test=certs/tenant.crt|certs/tenant.key"
 ./build/rimau-server --database data/rimau.sqlite3 --set request_timeout_seconds=30
 ./build/rimau-server --database data/rimau.sqlite3 --set header_timeout_seconds=10
@@ -164,6 +165,7 @@ Contoh ubah config:
 ./build/rimau-server --database data/rimau.sqlite3 --set reverse_proxy_read_timeout_seconds=30
 ./build/rimau-server --database data/rimau.sqlite3 --set reverse_proxy_max_response_bytes=1048576
 ./build/rimau-server --database data/rimau.sqlite3 --set reverse_proxy_retry_count=1
+./build/rimau-server --database data/rimau.sqlite3 --set reverse_proxy_load_balancing_policy=round_robin
 ./build/rimau-server --database data/rimau.sqlite3 --set reverse_proxy_tls_verify_upstream=false
 ./build/rimau-server --database data/rimau.sqlite3 --set reverse_proxy_circuit_breaker_enabled=true
 ./build/rimau-server --database data/rimau.sqlite3 --set reverse_proxy_circuit_breaker_failure_threshold=3
@@ -201,11 +203,11 @@ Contoh:
 
 Jika `modsecurity_audit_log_enabled=true`, setiap WAF match menghasilkan event `rimau_waf_audit` berstruktur melalui stderr logger. Event ini tidak menulis raw body, query string, header values, cookie, authorization, atau WAF evidence. Rotation/retention perlu dibuat oleh systemd-journald, container log driver, atau logrotate sehingga audit sink khusus ditambah.
 
-Static vhost melayan fail dari document root host tersebut. Proxy vhost menghantar request kepada upstream HTTP/1.1 dan menyalin response kembali kepada client. Jika request ialah WebSocket Upgrade, Rimau membuat upstream WebSocket handshake dan kemudian tunnel data dua hala melalui worker `epoll` yang sama. Jika beberapa upstream diberi, Rimau memilih secara round-robin asas dan boleh retry ke upstream seterusnya mengikut `reverse_proxy_retry_count`. Upstream yang gagal berulang kali boleh dipintas sementara oleh passive circuit breaker dan akan menghasilkan `503 Service Unavailable` jika semua target terbuka circuit-nya. Script vhost hanya declaration buat masa ini dan akan pulang `501` sehingga runtime bundled sebenar dipilih dan diintegrasi.
+Static vhost melayan fail dari document root host tersebut. Proxy vhost untuk HTTP/1.1 menghantar request kepada upstream HTTP/1.1 melalui worker `epoll` dan menyalin response buffered kembali kepada client. Jika request ialah WebSocket Upgrade, Rimau membuat upstream WebSocket handshake dan kemudian tunnel data dua hala melalui worker `epoll` yang sama. Jika beberapa upstream diberi, Rimau memilih mengikut `reverse_proxy_load_balancing_policy`: `round_robin`, `failover`, atau `stable_hash`, dan boleh retry ke upstream seterusnya mengikut `reverse_proxy_retry_count`. Upstream yang gagal berulang kali boleh dipintas sementara oleh passive circuit breaker dan akan menghasilkan `503 Service Unavailable` jika semua target terbuka circuit-nya. Script vhost hanya declaration buat masa ini dan akan pulang `501` sehingga runtime model sebenar diterima; Rimau tidak memanggil system `php`, `python`, `perl`, atau interpreter lain.
 
 Nota keselamatan: HTTPS upstream menggunakan bundled OpenSSL untuk transport TLS. `reverse_proxy_tls_verify_upstream=true` menghidupkan verification menggunakan default trust paths; policy CA/per-upstream yang lebih lengkap masih kerja susulan.
 
-`http2_enabled=true` mengaktifkan partial cleartext h2c prior-knowledge request serving asas dan partial TLS ALPN `h2` serving apabila `tls_alpn_protocols=h2,http/1.1` atau senarai ALPN lain yang mengandungi `h2`. Ini bukan HTTP/2 production support penuh; flow-control penuh, continuation assembly, HPACK lengkap, dan broad multiplexing semantics belum siap. `http3_enabled=true` masih status/config untuk HTTP/3 live serving. Server belum mengiklankan ALPN `h3` dan belum mempunyai HTTP/3 UDP/QUIC listener.
+`http2_enabled=true` mengaktifkan native cleartext h2c prior-knowledge request serving dan TLS ALPN `h2` serving apabila `tls_alpn_protocols=h2,http/1.1` atau senarai ALPN lain yang mengandungi `h2`. HTTP/2 P4 meliputi HPACK Huffman/dynamic-table decode, CONTINUATION assembly, stream lifecycle asas, inbound flow-control accounting, dan real-client h2c/TLS tests; broad multiplexing stress, outbound response flow-control scheduling, dan producer-side streaming masih kerja susulan. `http3_enabled=true` masih status/config untuk HTTP/3 live serving. Server belum mengiklankan ALPN `h3` dan belum mempunyai HTTP/3 UDP/QUIC listener.
 
 ## Documentation
 

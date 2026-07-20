@@ -449,32 +449,6 @@ UpstreamConnection connect_upstream(const ReverseProxyTarget& upstream, int time
     return connection;
 }
 
-std::string build_upstream_request(const Request& request, const ReverseProxyTarget& upstream)
-{
-    std::ostringstream output;
-    output << request.method << ' ' << reverse_proxy_target_path(upstream, request.target) << " HTTP/1.1\r\n";
-    output << "host: " << upstream.authority << "\r\n";
-    output << "connection: close\r\n";
-
-    if (const auto original_host = request.header("host")) {
-        output << "x-forwarded-host: " << *original_host << "\r\n";
-    }
-
-    for (const auto& [name, value] : request.headers) {
-        const std::string normalized_name = lowercase(name);
-        if (normalized_name == "host" || normalized_name == "content-length" || is_hop_by_hop_header(normalized_name)) {
-            continue;
-        }
-        output << normalized_name << ": " << value << "\r\n";
-    }
-
-    const auto body = request.body_text();
-    output << "content-length: " << body.size() << "\r\n";
-    output << "\r\n";
-    output << body;
-    return output.str();
-}
-
 void write_all(int fd, std::string_view payload, int timeout_seconds)
 {
     std::size_t sent_total = 0;
@@ -665,7 +639,68 @@ std::optional<std::string> decode_chunked_body(std::string_view encoded)
     }
 }
 
-Response parse_upstream_response(std::string raw_response)
+std::string upstream_circuit_key(const ReverseProxyTarget& upstream)
+{
+    std::ostringstream output;
+    output << upstream.scheme << "://" << upstream.authority << upstream.base_path;
+    return output.str();
+}
+
+std::size_t bounded_proxy_attempts(const std::vector<ReverseProxyTarget>& upstreams, std::size_t retry_count)
+{
+    constexpr std::size_t max_proxy_attempts = 16;
+    const auto requested_attempts = std::min(
+        retry_count == std::numeric_limits<std::size_t>::max() ? retry_count : retry_count + 1,
+        max_proxy_attempts);
+    return upstreams.size() == 1 ? requested_attempts : std::min(upstreams.size(), requested_attempts);
+}
+
+std::size_t stable_hash_start(const Request& request, std::size_t upstream_count)
+{
+    std::string key;
+    if (const auto host = request.header("host")) {
+        key += *host;
+    }
+    key.push_back('\n');
+    key += request.target;
+
+    std::uint64_t hash = 1469598103934665603ULL;
+    for (const unsigned char ch : key) {
+        hash ^= static_cast<std::uint64_t>(ch);
+        hash *= 1099511628211ULL;
+    }
+    return static_cast<std::size_t>(hash % upstream_count);
+}
+
+} // namespace
+
+std::string build_reverse_proxy_upstream_request(const Request& request, const ReverseProxyTarget& upstream)
+{
+    std::ostringstream output;
+    output << request.method << ' ' << reverse_proxy_target_path(upstream, request.target) << " HTTP/1.1\r\n";
+    output << "host: " << upstream.authority << "\r\n";
+    output << "connection: close\r\n";
+
+    if (const auto original_host = request.header("host")) {
+        output << "x-forwarded-host: " << *original_host << "\r\n";
+    }
+
+    for (const auto& [name, value] : request.headers) {
+        const std::string normalized_name = lowercase(name);
+        if (normalized_name == "host" || normalized_name == "content-length" || is_hop_by_hop_header(normalized_name)) {
+            continue;
+        }
+        output << normalized_name << ": " << value << "\r\n";
+    }
+
+    const auto body = request.body_text();
+    output << "content-length: " << body.size() << "\r\n";
+    output << "\r\n";
+    output << body;
+    return output.str();
+}
+
+Response parse_reverse_proxy_upstream_response(std::string raw_response)
 {
     const auto header_end = raw_response.find("\r\n\r\n");
     if (header_end == std::string::npos) {
@@ -740,32 +775,58 @@ Response parse_upstream_response(std::string raw_response)
     return response;
 }
 
-std::string upstream_circuit_key(const ReverseProxyTarget& upstream)
+ReverseProxyLoadBalancingPolicy parse_reverse_proxy_load_balancing_policy(std::string_view value)
 {
-    std::ostringstream output;
-    output << upstream.scheme << "://" << upstream.authority << upstream.base_path;
-    return output.str();
+    auto normalized = lowercase(trim(std::string(value)));
+    if (normalized == "round_robin" || normalized == "round-robin") {
+        return ReverseProxyLoadBalancingPolicy::round_robin;
+    }
+    if (normalized == "failover") {
+        return ReverseProxyLoadBalancingPolicy::failover;
+    }
+    if (normalized == "stable_hash" || normalized == "stable-hash") {
+        return ReverseProxyLoadBalancingPolicy::stable_hash;
+    }
+    throw std::runtime_error("reverse_proxy_load_balancing_policy must be round_robin, failover, or stable_hash");
 }
 
-std::vector<ReverseProxyTarget> ordered_proxy_upstreams(const std::vector<ReverseProxyTarget>& upstreams, std::size_t retry_count)
+std::string_view reverse_proxy_load_balancing_policy_name(ReverseProxyLoadBalancingPolicy policy)
+{
+    switch (policy) {
+    case ReverseProxyLoadBalancingPolicy::round_robin:
+        return "round_robin";
+    case ReverseProxyLoadBalancingPolicy::failover:
+        return "failover";
+    case ReverseProxyLoadBalancingPolicy::stable_hash:
+        return "stable_hash";
+    }
+    return "round_robin";
+}
+
+std::vector<ReverseProxyTarget> ordered_reverse_proxy_upstreams(
+    const Request& request,
+    const std::vector<ReverseProxyTarget>& upstreams,
+    const ReverseProxySettings& settings)
 {
     if (upstreams.empty()) {
         return {};
     }
 
-    const auto start = next_proxy_upstream.fetch_add(1, std::memory_order_relaxed);
+    std::size_t start = 0;
+    if (settings.load_balancing_policy == ReverseProxyLoadBalancingPolicy::round_robin) {
+        start = next_proxy_upstream.fetch_add(1, std::memory_order_relaxed) % upstreams.size();
+    } else if (settings.load_balancing_policy == ReverseProxyLoadBalancingPolicy::stable_hash) {
+        start = stable_hash_start(request, upstreams.size());
+    }
+
     std::vector<ReverseProxyTarget> ordered;
-    constexpr std::size_t max_proxy_attempts = 16;
-    const auto requested_attempts = std::min(
-        retry_count == std::numeric_limits<std::size_t>::max() ? retry_count : retry_count + 1,
-        max_proxy_attempts);
+    const auto attempts = bounded_proxy_attempts(upstreams, settings.retry_count);
 
     if (upstreams.size() == 1) {
-        ordered.assign(requested_attempts, upstreams.front());
+        ordered.assign(attempts, upstreams.front());
         return ordered;
     }
 
-    const auto attempts = std::min(upstreams.size(), requested_attempts);
     ordered.reserve(attempts);
     for (std::size_t attempt = 0; attempt < attempts; ++attempt) {
         ordered.push_back(upstreams[(start + attempt) % upstreams.size()]);
@@ -773,12 +834,14 @@ std::vector<ReverseProxyTarget> ordered_proxy_upstreams(const std::vector<Revers
     return ordered;
 }
 
+namespace {
+
 Response reverse_proxy_response(const Request& request, const std::vector<ReverseProxyTarget>& upstreams, const ReverseProxySettings& settings)
 {
     bool skipped_open_circuit = false;
     bool attempted_upstream = false;
 
-    for (const auto& upstream : ordered_proxy_upstreams(upstreams, settings.retry_count)) {
+    for (const auto& upstream : ordered_reverse_proxy_upstreams(request, upstreams, settings)) {
         if (!reverse_proxy_upstream_available(upstream, settings)) {
             skipped_open_circuit = true;
             continue;
@@ -787,8 +850,8 @@ Response reverse_proxy_response(const Request& request, const std::vector<Revers
         attempted_upstream = true;
         try {
             auto connection = connect_upstream(upstream, settings.connect_timeout_seconds, settings.verify_tls_upstream);
-            write_all(connection, build_upstream_request(request, upstream), settings.connect_timeout_seconds);
-            auto response = parse_upstream_response(read_until_close(connection, settings.read_timeout_seconds, settings.max_response_bytes));
+            write_all(connection, build_reverse_proxy_upstream_request(request, upstream), settings.connect_timeout_seconds);
+            auto response = parse_reverse_proxy_upstream_response(read_until_close(connection, settings.read_timeout_seconds, settings.max_response_bytes));
             record_reverse_proxy_upstream_success(upstream, settings);
             return response;
         } catch (const std::exception&) {

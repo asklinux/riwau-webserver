@@ -1033,3 +1033,126 @@ OCSP stapling needs a complete certificate-chain and issuer model, responder URL
 Consequence:
 
 Rimau does not staple OCSP responses. Operators that require OCSP stapling should terminate TLS in a component that supports it, or rely on short-lived certificates and external certificate monitoring until a future ADR accepts a full OCSP implementation plan. Production certificate management guidance is documented in `docs/plans/022-production-certificate-management.md`, but OCSP remains unsupported there as well.
+
+## ADR-0040: Continue Native HTTP/2 Production Path
+
+- Date: 2026-07-20
+- Status: Accepted
+
+Decision:
+
+Continue the Phase 4 HTTP/2 production path as Rimau-native code and do not bundle or copy `nghttp2` or other external HTTP/2 implementation code for this phase.
+
+Implementation:
+
+- Keep the existing partial h2c/TLS ALPN `h2` runtime path in `ClientConnection` until a tested native session module can replace it safely.
+- Add Rimau-owned HTTP/2 session code under `include/rimau/protocol/http2_session.hpp` and `src/protocol/http2_session.cpp`.
+- Move behavior incrementally behind tests: preface handling, SETTINGS/PING/RST/GOAWAY handling, HEADERS/DATA stream completion, request translation, response serialization, then lifecycle/CONTINUATION/HPACK/flow-control work.
+- Do not remove existing working HTTP/2 code solely for cleanup; old code should be replaced only after equivalent or better tests pass.
+- Do not claim production-complete HTTP/2 until stream lifecycle, CONTINUATION assembly, HPACK Huffman/dynamic table behavior, flow control, and real-client h2c/TLS `h2` success tests pass.
+
+Reason:
+
+The project goal is to build Rimau as its own web server. The existing code already has native HTTP/2 wire primitives and partial request serving. A native session module keeps ownership clear, avoids importing external protocol implementation code, and gives a safer path to extract the current large inline `ClientConnection` logic without breaking the partial runtime behavior that already exists.
+
+Consequence:
+
+P4 scope expands into careful native protocol work. This avoids a new HTTP/2 dependency, but it also means production-grade correctness must be earned through focused tests for stream states, HPACK, CONTINUATION, flow control, real-client behavior, and security limits. `nghttp2` may still appear as a client-side test dependency through system `curl --http2`, but Rimau server code must not vendor, copy, or link an external HTTP/2 implementation in this phase.
+
+## ADR-0041: Complete Native HTTP/2 Phase 4 Baseline
+
+- Date: 2026-07-20
+- Status: Accepted
+
+Decision:
+
+Mark the Phase 4 native HTTP/2 baseline implemented for h2c prior-knowledge and TLS ALPN `h2` request serving.
+
+Implementation:
+
+- Live HTTP/2 frame processing in `ClientConnection` delegates to `rimau::protocol::http2::ServerSession`.
+- `ServerSession` handles client preface, SETTINGS ACK, PING ACK, RST_STREAM, GOAWAY, HEADERS, CONTINUATION, DATA, stream completion, request translation, and response serialization.
+- `HpackDecoder` decodes HPACK static table entries, Huffman strings, dynamic table insert/reference, and dynamic table size updates.
+- Inbound DATA flow-control accounting updates connection and stream windows and emits WINDOW_UPDATE frames after buffered consumption.
+- Real-client CTests now require successful response bodies for both cleartext h2c via `curl --http2-prior-knowledge` and TLS ALPN `h2` via `curl --http2`.
+
+Reason:
+
+The previous partial HTTP/2 path could negotiate ALPN `h2` but could fail common curl/nghttp2 requests because HPACK Huffman was missing. Completing the native session module, HPACK decoder, CONTINUATION assembly, and real-client response tests closes the Phase 4 checklist without adding external server protocol code.
+
+Consequence:
+
+HTTP/2 is now reported as implemented by `--protocols` when considering the P4 baseline. The implementation is still intentionally small: response bodies are serialized through buffered output, outbound response flow-control scheduling for very large responses is not a streaming scheduler yet, and broader multiplexing stress/performance validation remains future hardening work. HTTP/3 remains partial wire-codec-only.
+
+## ADR-0042: SQLite Reverse Proxy Load Balancing Policy
+
+- Date: 2026-07-20
+- Status: Accepted
+
+Decision:
+
+Add SQLite key `reverse_proxy_load_balancing_policy` with supported values `round_robin`, `failover`, and `stable_hash`.
+
+Implementation:
+
+- Keep default behavior as `round_robin`.
+- Add `failover` to always try upstreams in configured order before retrying later targets.
+- Add `stable_hash` to choose a deterministic start upstream from request `Host` plus target, then fail over through the remaining upstreams.
+- Use the same upstream ordering helper for normal HTTP reverse proxy handling and WebSocket reverse proxy setup.
+- Validate the config key through `--set`, config load tests, and virtual-host ordering tests.
+
+Reason:
+
+Phase 5 needs load-balancing behavior beyond the previous implicit round-robin counter while keeping all runtime configuration in SQLite. The first production-safe step is deterministic policy selection without adding external dependencies or changing the virtual host config file model.
+
+Consequence:
+
+Rimau now has round-robin, failover, and stable-hash upstream selection. This completes the Phase 5 advanced load-balancing checklist item, but it does not complete active health checks, upstream connection pooling, request/response streaming, per-upstream TLS policy, or reactor-integrated normal HTTP upstream I/O.
+
+## ADR-0043: Move HTTP/1.1 Normal Reverse Proxy Upstream I/O Into Worker Reactor
+
+- Date: 2026-07-20
+- Status: Accepted
+
+Decision:
+
+Implement the first Phase 5 async reverse proxy step by moving normal HTTP/1.1 reverse proxy upstream connect/write/read work out of the `ReverseProxyHandler` blocking `poll()` path and into a `ClientConnection` state machine registered on the worker `epoll` reactor.
+
+Implementation:
+
+- HTTP/1.1 requests whose `Host` matches a reverse proxy virtual host are intercepted in `ClientConnection` after rate-limit and WAF checks.
+- The selected upstream ordering still uses SQLite `reverse_proxy_load_balancing_policy`, retry count, and the passive circuit breaker helpers.
+- Upstream TCP connect, optional upstream TLS handshake, request write, and response read are progressed by the worker `epoll` reactor.
+- The upstream response remains buffered and is parsed with the existing reverse proxy response parser before being serialized to the downstream client.
+- A network regression test with `worker_threads=1` verifies a slow proxy upstream does not block an unrelated static request on the same worker.
+
+Reason:
+
+The previous normal HTTP reverse proxy handler used non-blocking sockets but waited with `poll()` inside request dispatch. With one worker, a slow upstream could delay unrelated client work. Phase 5 requires reverse proxy upstream I/O to move toward the same non-blocking reactor model as the rest of the server.
+
+Consequence:
+
+HTTP/1.1 normal reverse proxy upstream I/O is now reactor-driven, but reverse proxy production work remains partial. Response and request bodies are still buffered rather than streamed with backpressure, upstream connection pooling and active health checks are not implemented, WebSocket proxy setup still performs DNS/connect/handshake before tunnel mode, and HTTP/2 reverse proxy dispatch still uses the shared handler path rather than an async per-stream proxy adapter.
+
+## ADR-0044: Keep Server-Side Runtime Support Declaration-Only Until A Runtime Is Accepted
+
+- Date: 2026-07-20
+- Status: Accepted
+
+Decision:
+
+For the P2 server-side runtime baseline, keep `script:runtime:path` virtual hosts as declarations only. Rimau must return explicit `501 Not Implemented` for script vhost requests and must not shell out to system `php`, `python`, `perl`, or any other interpreter.
+
+Implementation:
+
+- Keep `ServerSideScriptHandler` as a non-executing handler with `x-rimau-runtime-status: planned`.
+- Document the current contract in `docs/plans/023-server-side-runtime-support.md`.
+- Add a network regression test that places fake `php`, `python`, and `perl` executables first in `PATH`, sends requests to `script:php`, `script:python`, and `script:perl` vhosts, verifies `501`, and verifies the fake executables were not invoked.
+
+Reason:
+
+Server-side language runtimes are large dependency and security surfaces. Calling system interpreters would violate the current bundled-dependency direction and would make runtime behavior depend on host packages. Bundling PHP, Python, Perl, CGI/FastCGI, or another VM needs source/version/license/build/security/update planning before implementation.
+
+Consequence:
+
+Rimau still does not execute PHP, Python, Perl, CGI, FastCGI, or embedded scripts. Future runtime work requires a separate ADR that chooses a runtime model, pins sources or explicitly declares external dependencies, defines request/body/response contracts, and adds end-to-end tests.

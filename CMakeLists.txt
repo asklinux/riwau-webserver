@@ -289,6 +289,7 @@ add_library(rimau_core
     src/protocol/http2_frame.cpp
     src/protocol/http2_gateway.cpp
     src/protocol/http2_hpack.cpp
+    src/protocol/http2_session.cpp
     src/protocol/http3_frame.cpp
     src/protocol/http3_gateway.cpp
     src/protocol/protocol.cpp)
@@ -375,6 +376,10 @@ if(RIMAU_ENABLE_TESTS)
         tests/test_http2_wire.cpp)
     target_link_libraries(rimau-http2-wire-tests PRIVATE rimau_core)
 
+    add_executable(rimau-http2-session-tests
+        tests/test_http2_session.cpp)
+    target_link_libraries(rimau-http2-session-tests PRIVATE rimau_core)
+
     add_executable(rimau-http3-wire-tests
         tests/test_http3_wire.cpp)
     target_link_libraries(rimau-http3-wire-tests PRIVATE rimau_core)
@@ -395,6 +400,7 @@ if(RIMAU_ENABLE_TESTS)
     add_test(NAME rimau_config_database COMMAND rimau-config-database-tests)
     add_test(NAME rimau_protocol_capabilities COMMAND rimau-protocol-capabilities-tests)
     add_test(NAME rimau_http2_wire COMMAND rimau-http2-wire-tests)
+    add_test(NAME rimau_http2_session COMMAND rimau-http2-session-tests)
     add_test(NAME rimau_http3_wire COMMAND rimau-http3-wire-tests)
     add_test(NAME rimau_virtual_host COMMAND rimau-virtual-host-tests)
     add_test(NAME rimau_waf COMMAND rimau-waf-tests)
@@ -412,6 +418,15 @@ if(RIMAU_ENABLE_TESTS)
             "${CMAKE_SOURCE_DIR}/tests/test_http1_network.py"
             "$<TARGET_FILE:rimau-server>"
             "${CMAKE_BINARY_DIR}/test-runtime")
+    add_test(
+        NAME rimau_http2_h2c_curl
+        COMMAND
+            "${RIMAU_PYTHON3_EXECUTABLE}"
+            "${CMAKE_SOURCE_DIR}/tests/test_http2_h2c_curl.py"
+            "$<TARGET_FILE:rimau-server>"
+            "${CMAKE_BINARY_DIR}/test-runtime")
+    set_tests_properties(rimau_http2_h2c_curl PROPERTIES
+        SKIP_REGULAR_EXPRESSION "SKIP:")
     add_test(
         NAME rimau_tls_alpn_h2_curl
         COMMAND

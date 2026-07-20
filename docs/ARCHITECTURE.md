@@ -4,7 +4,7 @@
 
 Rimau Web Server disusun sebagai web server C++ modular. Matlamat jangka panjang ialah menyokong HTTP/1.1, HTTP/2, dan HTTP/3 dengan architecture yang boleh berkembang ke arah event-driven, TLS/ALPN, reverse proxy, static serving, caching, observability, dan plugin.
 
-Status semasa ialah scaffold awal yang sudah mempunyai HTTP/1.1 praktikal, HTTPS/TLS hardening asas, kawalan keselamatan runtime asas, built-in ModSecurity-compatible WAF dengan subset OWASP CRS-inspired rules, SQLite virtual host routing, baseline reverse proxy dengan HTTP/HTTPS upstream, multi-upstream round-robin asas, retry/failover asas, WebSocket reverse proxy tunneling, passive circuit breaker, HTTP/2 wire codec partial, partial cleartext h2c dan TLS ALPN `h2` request serving, dan HTTP/3 wire codec primitives. HTTP/2 production session behavior, HTTP/3 live request serving, full `libmodsecurity`, dan full OWASP Core Rule Set masih belum lengkap.
+Status semasa ialah scaffold awal yang sudah mempunyai HTTP/1.1 praktikal, HTTPS/TLS hardening asas, kawalan keselamatan runtime asas, built-in ModSecurity-compatible WAF dengan subset OWASP CRS-inspired rules, SQLite virtual host routing, HTTP/1.1 reverse proxy buffered dengan HTTP/HTTPS upstream I/O melalui worker `epoll`, configurable multi-upstream policy (`round_robin`, `failover`, `stable_hash`), WebSocket reverse proxy tunneling, passive circuit breaker, native HTTP/2 h2c dan TLS ALPN `h2` request serving, dan HTTP/3 wire codec primitives. HTTP/3 live request serving, full `libmodsecurity`, full OWASP Core Rule Set, dan reverse proxy streaming/backpressure masih belum lengkap.
 
 Pada 2026-07-18, Rimau mula mengadaptasi konsep daripada Proxygen (`https://github.com/facebook/proxygen`) secara seni bina, bukan salinan kod. Konsep yang diambil ialah pemisahan connection/session, transaction, request handler, request handler factory, dan downstream response writer.
 
@@ -25,8 +25,8 @@ main()
   -> non-blocking accept/read/write per client in worker
   -> optional non-blocking TLS 1.2/1.3 handshake with SNI certificate selection and ALPN http/1.1 or h2 if tls_enabled=true
   -> enforce request/header/body/idle timeouts
-  -> if cleartext HTTP/2 preface or TLS ALPN h2 preface and http2_enabled=true: parse SETTINGS, write SETTINGS + SETTINGS ACK, then process HTTP/2 HEADERS/DATA frames
-  -> for complete HTTP/2 streams: decode HPACK baseline headers, build Request, dispatch through Transaction, serialize response as HTTP/2 HEADERS/DATA frames
+  -> if cleartext HTTP/2 preface or TLS ALPN h2 preface and http2_enabled=true: enter native HTTP/2 ServerSession, parse SETTINGS, write SETTINGS + SETTINGS ACK, then process HTTP/2 HEADERS/CONTINUATION/DATA frames
+  -> for complete HTTP/2 streams: decode HPACK headers including Huffman/dynamic table entries, apply inbound flow-control accounting, build Request, dispatch through Transaction, serialize response as HTTP/2 HEADERS/DATA frames
   -> detect complete HTTP/1.1 message through rimau::http::next_http1_request_frame headers, Content-Length, or chunked transfer decoding
   -> for HTTP/1.1 headers-complete/body-incomplete requests: stream incoming Content-Length or chunked body bytes into RequestBodyAccumulator with 16 KiB memory threshold and mkstemp-backed temporary-file spooling
   -> reject invalid HTTP framing and request-smuggling patterns
@@ -35,9 +35,10 @@ main()
   -> if WebSocket Upgrade does not match proxy vhost: local basic WebSocket echo state
   -> enforce per-IP request rate limit
   -> if modsecurity_enabled=true: inspect request with built-in ModSecurity-compatible OWASP CRS-inspired WAF subset
-  -> Transaction
+  -> if HTTP/1.1 Host matches reverse proxy vhost: ClientConnection starts reverse proxy upstream connect/write/read through worker epoll, with buffered response parsing
+  -> otherwise Transaction
   -> VirtualHostHandlerFactory
-  -> select static, reverse proxy, script-placeholder, or fallback static handler
+  -> select static, legacy/shared reverse proxy handler, script-placeholder, or fallback static handler
   -> reverse proxy checks passive upstream circuit breaker before upstream connect when route is proxy
   -> ResponseSink
   -> serialize HTTP/1.1 response
@@ -90,8 +91,9 @@ Responsibility:
 - Static file response
 - Basic MIME detection
 - Host-based virtual host routing
-- Baseline HTTP reverse proxy
-- Server-side runtime declaration placeholder that returns explicit `501`
+- HTTP/1.1 reactor-driven buffered HTTP reverse proxy
+- Legacy/shared buffered reverse proxy handler for non-intercepted dispatch paths
+- Server-side runtime declaration placeholder that returns explicit `501` and never shells out to system interpreters
 - Built-in ModSecurity-compatible WAF inspection with OWASP CRS-inspired rule subset
 - Request handler pipeline
 - Transaction dispatch abstraction
@@ -120,13 +122,15 @@ Responsibility:
 - Protocol status/gateway integration points
 - Protocol capability reporting
 - Protocol enable flags and support status reporting
-- HTTP/2 wire frame codec, SETTINGS codec, HPACK baseline, and partial h2c/TLS ALPN `h2` request serving
+- HTTP/2 wire frame codec, SETTINGS codec, HPACK Huffman/dynamic-table decode, and native h2c/TLS ALPN `h2` request serving
+- Native HTTP/2 `ServerSession` module for Phase 4 wired into the live `ClientConnection` path
 - HTTP/3 QUIC varint, frame, and SETTINGS codec primitives
 - Adapting protocol-specific wire I/O into the shared HTTP transaction pipeline
 
 Important files:
 
 - `src/protocol/http2_gateway.cpp`
+- `src/protocol/http2_session.cpp`
 - `src/protocol/http3_gateway.cpp`
 - `src/protocol/protocol.cpp`
 
@@ -235,6 +239,7 @@ Supported keys:
 - `reverse_proxy_read_timeout_seconds`
 - `reverse_proxy_max_response_bytes`
 - `reverse_proxy_retry_count`
+- `reverse_proxy_load_balancing_policy`
 - `reverse_proxy_tls_verify_upstream`
 - `reverse_proxy_circuit_breaker_enabled`
 - `reverse_proxy_circuit_breaker_failure_threshold`
@@ -336,7 +341,7 @@ Virtual host behavior:
 Host: site.test         static vhost document root
 Host: *.tenant.test     simple wildcard static vhost document root
 Host: api.test          reverse proxy to configured http:// or https:// upstream pool
-Host: app.test          script runtime declaration, returns 501 until bundled runtime exists
+Host: app.test          script runtime declaration, returns 501 until an accepted bundled/external runtime model exists
 ```
 
 If no virtual host rule matches, the request falls back to global `document_root`.
@@ -424,6 +429,7 @@ Supported keys:
 - `reverse_proxy_read_timeout_seconds`
 - `reverse_proxy_max_response_bytes`
 - `reverse_proxy_retry_count`
+- `reverse_proxy_load_balancing_policy`
 - `reverse_proxy_tls_verify_upstream`
 - `reverse_proxy_circuit_breaker_enabled`
 - `reverse_proxy_circuit_breaker_failure_threshold`
@@ -480,6 +486,7 @@ Examples:
 ./build/rimau-server --database data/rimau.sqlite3 --set reverse_proxy_read_timeout_seconds=30
 ./build/rimau-server --database data/rimau.sqlite3 --set reverse_proxy_max_response_bytes=1048576
 ./build/rimau-server --database data/rimau.sqlite3 --set reverse_proxy_retry_count=1
+./build/rimau-server --database data/rimau.sqlite3 --set reverse_proxy_load_balancing_policy=round_robin
 ./build/rimau-server --database data/rimau.sqlite3 --set reverse_proxy_tls_verify_upstream=false
 ./build/rimau-server --database data/rimau.sqlite3 --set reverse_proxy_circuit_breaker_enabled=true
 ./build/rimau-server --database data/rimau.sqlite3 --set reverse_proxy_circuit_breaker_failure_threshold=3
@@ -537,9 +544,9 @@ Production config ownership, backup, and migration behavior are not final. Needs
 Current rule:
 
 - HTTP/1.1 is implemented and enabled by default.
-- HTTP/2 can be toggled in SQLite for partial cleartext h2c request serving and partial TLS ALPN `h2` request serving, but full HPACK, continuation assembly, and production flow-control/session behavior are not implemented yet.
+- HTTP/2 is implemented for native cleartext h2c prior-knowledge and TLS ALPN `h2` request serving, with HPACK Huffman/dynamic-table decoding, CONTINUATION assembly, stream lifecycle basics, inbound flow-control accounting, and real-client curl coverage. HTTP/2 reverse proxy dispatch still uses the shared handler path, not the HTTP/1.1 async proxy state machine.
 - HTTP/3 can be toggled in SQLite for status visibility, but HTTP/3 network serving is not implemented yet.
-- If HTTP/1.1 is disabled, startup is allowed for cleartext h2c partial serving when `http2_enabled=true` and `tls_enabled=false`, or for TLS ALPN `h2` partial serving when `http2_enabled=true`, `tls_enabled=true`, and `tls_alpn_protocols` includes `h2`; otherwise startup fails because no client-served protocol remains enabled.
+- If HTTP/1.1 is disabled, startup is allowed for cleartext h2c serving when `http2_enabled=true` and `tls_enabled=false`, or for TLS ALPN `h2` serving when `http2_enabled=true`, `tls_enabled=true`, and `tls_alpn_protocols` includes `h2`; otherwise startup fails because no client-served protocol remains enabled.
 - ALPN advertises `http/1.1` when HTTP/1.1 is enabled and can advertise `h2` when HTTP/2 is enabled. ALPN `h3` is intentionally not advertised until HTTP/3 live serving exists.
 
 ## Proxygen-Inspired Pipeline
@@ -612,10 +619,10 @@ Current:
 - SQLite-configurable default security header values and configurable `Server` header emission.
 - Host-based virtual host routing with exact host and simple `*.domain` wildcard matching.
 - Static virtual hosts with host-specific document roots.
-- Baseline reverse proxy virtual hosts for HTTP and HTTPS upstream targets.
-- Multiple reverse proxy upstreams per vhost with basic round-robin selection and retry/failover.
+- HTTP/1.1 reverse proxy virtual hosts for HTTP and HTTPS upstream targets with upstream connect/write/read progressed by worker `epoll` and buffered downstream response serialization.
+- Multiple reverse proxy upstreams per vhost with SQLite-configurable `round_robin`, `failover`, or `stable_hash` selection and retry/failover.
 - Process-local passive reverse proxy circuit breaker with SQLite-configured threshold and cooldown.
-- Script virtual host declarations such as `script:php:path`; execution is not implemented and returns `501`.
+- Script virtual host declarations such as `script:php:path`; execution is not implemented, returns `501`, and must not invoke system `php`, `python`, `perl`, or other interpreters.
 - HTTP/1.1 keep-alive.
 - Configurable keep-alive idle timeout through `http_keep_alive_timeout_seconds`.
 - Configurable per-connection request cap through `http_keep_alive_max_requests`.
@@ -649,7 +656,7 @@ Missing:
 - Full request pipelining stress validation.
 - Arbitrary custom security header names.
 - Distributed or shared rate limiting across processes.
-- Reverse proxy HTTP request/response streaming, per-upstream HTTPS CA/pinning/verify-depth policy, advanced load balancing, active health checks, upstream connection pooling, and a fully async upstream state machine for normal HTTP proxy traffic.
+- Reverse proxy HTTP request/response streaming, weighted load balancing if needed, per-upstream HTTPS CA/pinning/verify-depth policy, active health checks, upstream connection pooling, HTTP/2 async proxy adapter, and fully async DNS/connect/TLS/handshake setup for WebSocket proxy traffic.
 - Bundled PHP/Python/Perl or other server-side runtime execution.
 
 ### HTTP/2
@@ -658,29 +665,27 @@ Current:
 
 - SQLite config key `http2_enabled`.
 - Gateway status reporting through `http2_status(config)`.
-- Protocol capability reporting shows `partial` status for wire codec work and configured state separately from full request-serving implementation state.
+- Protocol capability reporting marks HTTP/2 implemented while still showing whether `http2_enabled` is active in SQLite.
 - HTTP/2 client connection preface detection for cleartext h2c prior-knowledge clients and TLS clients after ALPN `h2` negotiation.
 - HTTP/2 frame parser/serializer for the 9-byte header, frame length, type, flags, stream id, and payload.
 - HTTP/2 SETTINGS payload parser/serializer.
 - Basic HTTP/2 frame validation for SETTINGS, PING, GOAWAY, WINDOW_UPDATE, RST_STREAM, DATA, HEADERS, and CONTINUATION.
-- HPACK baseline for static-table indexed fields, literal fields without Huffman, and literal incremental decode without dynamic-table persistence.
-- When `http2_enabled=true`, Rimau accepts h2c or TLS ALPN `h2` client preface + SETTINGS, replies SETTINGS + SETTINGS ACK, handles SETTINGS ACK/PING/RST_STREAM/WINDOW_UPDATE basics, decodes HEADERS/DATA for complete streams, dispatches to `Transaction`, and writes HTTP/2 response HEADERS/DATA frames.
-- Automated CTest `rimau_tls_alpn_h2_curl` starts a temporary TLS Rimau server and uses `curl --http2` as a real HTTP/2 client to verify ALPN selects `h2`.
+- HPACK decoder supports static table, Huffman strings, dynamic table insert/reference, and dynamic table size update.
+- Native `rimau::protocol::http2::ServerSession` handles preface acceptance/rejection, SETTINGS/PING/RST_STREAM/GOAWAY, HEADERS plus CONTINUATION assembly, DATA stream completion, stream lifecycle basics, inbound flow-control accounting with WINDOW_UPDATE, request translation, and HTTP/2 response serialization.
+- `ClientConnection` now delegates live h2c and TLS ALPN `h2` frame processing to `ServerSession` while keeping HTTP/1.1/WebSocket/TLS state in the worker reactor.
+- Automated CTest `rimau_http2_h2c_curl` starts a temporary cleartext Rimau server and uses `curl --http2-prior-knowledge` to fetch a real response.
+- Automated CTest `rimau_tls_alpn_h2_curl` starts a temporary TLS Rimau server and uses `curl --http2` to verify ALPN `h2` and fetch a real response.
 
 Required future work:
 
-- Upgrade the current curl ALPN smoke to require successful HTTP/2 responses after HPACK Huffman/dynamic-table behavior is implemented.
-- Dedicated HTTP/2 connection/session module instead of the current `ClientConnection` inline partial path.
-- Full HPACK header compression, including Huffman and dynamic table persistence.
-- Complete stream lifecycle and broad multiplexing behavior.
-- CONTINUATION frame assembly.
-- Flow control.
-- Priority handling. Needs verification for current RFC expectations.
-- Integration tests with a real HTTP/2 client.
+- Broader multiplexing stress tests and long-lived concurrent stream validation.
+- Producer-side async response streaming/backpressure for large HTTP/2 responses.
+- Outbound response flow-control scheduling beyond buffered response serialization.
+- Priority handling remains ignored; HTTP/2 priority is deprecated in modern RFC guidance. Needs verification if older priority semantics must be supported.
 
-Candidate library:
+Implementation decision:
 
-- `nghttp2`. Needs verification.
+- ADR-0040 keeps P4 HTTP/2 server implementation native to Rimau; do not bundle, copy, or link an external HTTP/2 server implementation for this phase.
 
 ### HTTP/3
 
@@ -750,7 +755,7 @@ Implemented:
 - Static file symlink escape mitigation through canonical path checks.
 - Runtime SQLite databases are ignored by `.gitignore`.
 - Request header size limit.
-- TLS for HTTP/1.1 and partial HTTP/2 ALPN `h2` through bundled static OpenSSL.
+- TLS for HTTP/1.1 and HTTP/2 ALPN `h2` through bundled static OpenSSL.
 - Runtime config database access through bundled static SQLite.
 - Gzip compression through bundled static zlib.
 - `rimau-server` static-links `libstdc++` and `libgcc` on Linux GNU/Clang builds when supported.
@@ -774,6 +779,7 @@ Implemented:
 - Reverse proxy HTTPS upstream transport through bundled OpenSSL.
 - WebSocket proxy upstream handshake validation and sanitized `101 Switching Protocols` response serialization.
 - Passive reverse proxy circuit breaker returns `503 Service Unavailable` with `Retry-After` when every selected upstream circuit is open.
+- Reverse proxy upstream selection policy is validated as `round_robin`, `failover`, or `stable_hash`.
 - Generated dev certificates and private keys are ignored by `.gitignore`.
 
 Missing:
@@ -785,12 +791,12 @@ Missing:
 - Privilege dropping.
 - Full parser hardening beyond the deterministic `rimau_http_fuzz` CTest smoke.
 - Continuous or sanitizer-backed fuzz testing beyond the deterministic CTest smoke.
-- Full real-client HTTP/2 request success with curl/nghttp2; the current curl test verifies ALPN `h2` selection but accepts the known HPACK Huffman `COMPRESSION_ERROR` request path.
+- Broader HTTP/2 multiplexing stress/performance validation and outbound response flow-control scheduling.
 - Full `libmodsecurity` transaction engine integration and full OWASP Core Rule Set bundle are deferred beyond P1 by ADR-0034. Needs verification.
 - Rich WAF rule tuning beyond ADR-0035, dedicated WAF audit log persistence beyond ADR-0036, and ModSecurity rule syntax parsing.
 - Advanced slow-client scoring.
 - Safe default production file permissions.
-- Reverse proxy request/response policy hardening beyond current hop-by-hop header stripping, buffered-size limit, WebSocket proxy handshake validation, passive circuit breaker, basic retry, and TLS transport.
+- Reverse proxy request/response policy hardening beyond current hop-by-hop header stripping, buffered-size limit, WebSocket proxy handshake validation, passive circuit breaker, configurable upstream selection policy, basic retry, and TLS transport.
 - Production validation for static glibc DNS/NSS hostname behavior in reverse proxy paths. Needs verification.
 
 ## Performance Notes
@@ -801,7 +807,7 @@ Major performance work still required:
 
 - Benchmark the Linux `epoll` backend and decide whether `io_uring` or another abstraction is needed. Needs verification.
 - Add sendfile or zero-copy static file path.
-- Move normal HTTP reverse proxy upstream connections into the worker reactor or an async upstream state machine; current normal HTTP proxy path uses non-blocking upstream sockets but waits with `poll()` inside the handler and uses blocking DNS resolution through `getaddrinfo`. WebSocket proxy data tunneling is registered with the worker `epoll` reactor after the upstream handshake, but DNS/connect/handshake are still completed before tunnel mode starts.
+- HTTP/1.1 normal reverse proxy upstream connections now progress through the worker `epoll` reactor, but request/response bodies are still buffered, DNS resolution still uses blocking `getaddrinfo`, HTTP/2 reverse proxy dispatch still uses the shared handler path, and WebSocket proxy DNS/connect/handshake are still completed before tunnel mode starts.
 - Add deeper memory pools for response buffers and file I/O.
 - Add benchmark suite.
 - Add memory allocator and buffer management strategy. Needs verification.

@@ -64,7 +64,7 @@ require_match(updated_config "http2_enabled=true" "updated HTTP/2 flag in --chec
 
 run_rimau(0 protocol_output --database "${database_path}" --protocols)
 require_match(protocol_output "HTTP/1\\.1: implemented, configured=enabled" "HTTP/1.1 protocol status")
-require_match(protocol_output "HTTP/2: partial, configured=enabled" "HTTP/2 protocol status")
+require_match(protocol_output "HTTP/2: implemented, configured=enabled" "HTTP/2 protocol status")
 require_match(protocol_output "HTTP/3: partial, configured=disabled" "HTTP/3 protocol status")
 
 run_rimau(
@@ -74,7 +74,7 @@ run_rimau(
     --set http2_enabled=false
     --set tls_alpn_protocols=http/1.1
     --protocols)
-require_match(set_protocol_output "HTTP/2: partial, configured=disabled" "HTTP/2 protocol status after --set")
+require_match(set_protocol_output "HTTP/2: implemented, configured=disabled" "HTTP/2 protocol status after --set")
 
 run_rimau(1 invalid_set --database "${database_path}" --set port=70000)
 require_match(invalid_set_ERROR "port must be between 1 and 65535" "invalid --set error")

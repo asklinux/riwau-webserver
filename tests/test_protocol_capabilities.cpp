@@ -38,13 +38,13 @@ int main()
     assert(http1.notes.find("directory index and error page") != std::string::npos);
     assert(http1.notes.find("WebSocket") != std::string::npos);
     assert(http1.notes.find("reverse proxy tunneling") != std::string::npos);
+    assert(http1.notes.find("upstream selection policies") != std::string::npos);
     assert(http1.notes.find("security controls") != std::string::npos);
 
     const auto& http2 = find_capability(defaults, rimau::protocol::ProtocolVersion::http_2);
-    assert(!http2.implemented);
+    assert(http2.implemented);
     assert(!http2.enabled);
     assert(http2.transport.find("h2c") != std::string::npos);
-    assert(http2.transport.find("partial") != std::string::npos);
     assert(rimau::protocol::http2_status(config).find("disabled in SQLite config") != std::string::npos);
 
     const auto& http3 = find_capability(defaults, rimau::protocol::ProtocolVersion::http_3);
@@ -64,9 +64,9 @@ int main()
     assert(enabled_http1.transport == "TCP with TLS");
 
     const auto& enabled_http2 = find_capability(enabled, rimau::protocol::ProtocolVersion::http_2);
-    assert(!enabled_http2.implemented);
+    assert(enabled_http2.implemented);
     assert(enabled_http2.enabled);
-    assert(enabled_http2.notes.find("partial") != std::string::npos);
+    assert(enabled_http2.notes.find("native") != std::string::npos);
     assert(enabled_http2.notes.find("ALPN h2") != std::string::npos);
 
     const auto& enabled_http3 = find_capability(enabled, rimau::protocol::ProtocolVersion::http_3);

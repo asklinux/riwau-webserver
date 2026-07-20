@@ -12,7 +12,7 @@
 ## P1 - HTTP/1.1 Completion
 
 - Add transaction IDs that are unique per connection/session.
-- Add integration tests for virtual host routing, fallback host behavior, reverse proxy success/failure, WebSocket proxy HTTP/HTTPS upstream behavior, and script-placeholder 501 behavior.
+- Add remaining integration tests for virtual host routing, fallback host behavior, reverse proxy success/failure, and WebSocket proxy HTTP/HTTPS upstream behavior. Script-placeholder 501/no-shell-out behavior is covered in `rimau_http1_network`.
 - Add live in-flight request body streaming before handler dispatch and explicit network-level backpressure contract; current HTTP/1.1 code provides file-backed body spooling and handler pull reads through `RequestBodyReader`.
 - Expose chunked trailers to handlers or explicitly discard them through a documented policy.
 - Add producer-side async response streaming/backpressure beyond current basic chunked response serialization.
@@ -64,14 +64,11 @@
 
 ## P2 - HTTP/2
 
-- Decide whether to continue native HTTP/2 session implementation or bundle a mature library such as `nghttp2` for full stream/session handling. Needs verification.
-- Replace current inline partial h2c/TLS ALPN `h2` request-serving path with a dedicated HTTP/2 connection/session module.
-- Add complete HTTP/2 stream lifecycle handling.
-- Add CONTINUATION frame assembly.
-- Complete HPACK support including Huffman and persistent dynamic table behavior, or replace baseline HPACK with chosen library.
-- Add flow control integration.
-- Harden TLS ALPN `h2` serving after HTTP/2 session behavior is validated.
-- Add integration tests using a real HTTP/2 client for h2c and TLS `h2` that require successful HTTP responses. Current `rimau_tls_alpn_h2_curl` covers TLS ALPN negotiation with curl/nghttp2 but still accepts the known HPACK Huffman `COMPRESSION_ERROR` request path until full HPACK support is implemented.
+- Phase 4 native HTTP/2 production path is implemented per ADR-0040: live `ClientConnection` delegates to `rimau::protocol::http2::ServerSession`, HPACK Huffman/dynamic-table decode exists, CONTINUATION assembly exists, stream lifecycle basics and inbound flow-control accounting exist, and real-client h2c/TLS `h2` curl tests require successful responses.
+- Add HTTP/2 multiplexing stress tests for many concurrent streams and interleaved DATA/HEADERS. Needs verification.
+- Add outbound HTTP/2 response flow-control scheduler for large responses beyond current buffered serialization. Needs verification.
+- Add producer-side async response streaming/backpressure for HTTP/2 responses.
+- Decide whether deprecated HTTP/2 priority semantics need compatibility behavior beyond safe ignore. Needs verification.
 
 ## P2 - HTTP/3
 
@@ -90,12 +87,12 @@
 - Add tracing/stats filter.
 - Add rewrite rules.
 - Add advanced virtual host routing such as per-host TLS policy, per-host security headers, and per-host access logs. Needs verification.
-- Move normal HTTP reverse proxy upstream I/O into the per-worker reactor or a dedicated async upstream state machine.
+- Extend the HTTP/1.1 reactor-driven normal reverse proxy path to HTTP/2 dispatch or define a separate async per-stream proxy adapter.
 - Add per-upstream reverse proxy HTTPS CA bundle, certificate pinning, verify-depth, and verification override policy. Needs verification.
-- Add reverse proxy response/request streaming and backpressure for normal HTTP traffic.
+- Add reverse proxy response/request streaming and backpressure for normal HTTP traffic; current HTTP/1.1 async proxy path still buffers request and response bodies.
 - Add fully asynchronous reverse proxy DNS/connect/TLS/handshake state machine for WebSocket proxy setup.
 - Add active reverse proxy health checks, circuit-breaker metrics/admin inspection, and upstream connection pooling.
-- Add advanced reverse proxy load balancing policies beyond current basic round-robin.
+- Continue reverse proxy policy hardening after implemented `round_robin`, `failover`, and `stable_hash` selection; weighted policies remain planned if needed.
 - Add compression configuration for gzip/Brotli enablement, minimum size, and MIME allowlist.
 - Add caching.
 - Add admin/control endpoint. Needs verification.
@@ -103,12 +100,12 @@
 
 ## P2 - Server-Side Runtimes
 
-- Decide whether Rimau should bundle PHP, Python, Perl, one smaller embedded VM, or only expose optional CGI/FastCGI adapters. Needs verification.
+- P2 baseline decision accepted in ADR-0044: keep `script:runtime:path` declaration-only and do not shell out to system interpreters until a runtime-specific ADR is accepted.
 - If bundling PHP, pin upstream source/version, license implications, build flags, static-link feasibility, extension policy, and security model. Needs verification.
 - If bundling Python, pin upstream source/version, embedded interpreter model, module path policy, package isolation, and security model. Needs verification.
 - If bundling Perl, pin upstream source/version, embedding API, module path policy, and security model. Needs verification.
-- Define virtual host script routing contract, entrypoint discovery, environment variables, request body streaming, timeout, memory limit, and process/thread isolation.
-- Add tests proving script vhost never shells out to system `php`, `python`, `perl`, or other external interpreters unless an explicitly documented optional external mode is accepted.
+- Define executable runtime contract beyond the current non-execution contract: entrypoint discovery, environment variables, request body streaming, timeout, memory limit, and process/thread isolation.
+- Add implementation tests for the chosen future runtime path after an ADR accepts bundled runtime or explicitly external CGI/FastCGI behavior.
 
 ## P3 - Deployment
 

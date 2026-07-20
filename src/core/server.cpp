@@ -12,6 +12,7 @@
 #include "rimau/protocol/http2_frame.hpp"
 #include "rimau/protocol/http2_gateway.hpp"
 #include "rimau/protocol/http2_hpack.hpp"
+#include "rimau/protocol/http2_session.hpp"
 #include "rimau/protocol/http3_gateway.hpp"
 
 #include <algorithm>
@@ -60,7 +61,6 @@ namespace {
 volatile std::sig_atomic_t g_shutdown_signal_requested = 0;
 volatile std::sig_atomic_t g_reload_signal_requested = 0;
 volatile std::sig_atomic_t g_last_signal = 0;
-std::atomic<std::size_t> g_next_websocket_proxy_upstream { 0 };
 std::atomic<std::size_t> g_next_request_body_spool { 0 };
 
 void handle_runtime_signal(int signal_number)
@@ -568,7 +568,7 @@ bool tls_runtime_settings_changed(const ServerConfig& current, const ServerConfi
 void log_protocol_config_warnings(const ServerConfig& config)
 {
     if (config.http2_enabled) {
-        log(LogLevel::warning, "HTTP/2 is enabled in SQLite config but support is still partial: " + rimau::protocol::http2_status(config));
+        log(LogLevel::info, "HTTP/2 is enabled in SQLite config: " + rimau::protocol::http2_status(config));
     }
 
     if (config.http3_enabled) {
@@ -1818,34 +1818,6 @@ WebSocketProxyUpstream connect_websocket_proxy_upstream(
     return connection;
 }
 
-std::vector<rimau::http::ReverseProxyTarget> ordered_websocket_proxy_upstreams(
-    const std::vector<rimau::http::ReverseProxyTarget>& upstreams,
-    std::size_t retry_count)
-{
-    if (upstreams.empty()) {
-        return {};
-    }
-
-    const auto start = g_next_websocket_proxy_upstream.fetch_add(1, std::memory_order_relaxed);
-    std::vector<rimau::http::ReverseProxyTarget> ordered;
-    constexpr std::size_t max_proxy_attempts = 16;
-    const auto requested_attempts = std::min(
-        retry_count == std::numeric_limits<std::size_t>::max() ? retry_count : retry_count + 1,
-        max_proxy_attempts);
-
-    if (upstreams.size() == 1) {
-        ordered.assign(requested_attempts, upstreams.front());
-        return ordered;
-    }
-
-    const auto attempts = std::min(upstreams.size(), requested_attempts);
-    ordered.reserve(attempts);
-    for (std::size_t attempt = 0; attempt < attempts; ++attempt) {
-        ordered.push_back(upstreams[(start + attempt) % upstreams.size()]);
-    }
-    return ordered;
-}
-
 std::optional<std::vector<rimau::http::ReverseProxyTarget>> websocket_proxy_upstreams_for_request(
     const rimau::http::Request& request,
     const ServerConfig& config)
@@ -1861,6 +1833,73 @@ std::optional<std::vector<rimau::http::ReverseProxyTarget>> websocket_proxy_upst
     }
 
     return rule->upstreams;
+}
+
+std::optional<std::vector<rimau::http::ReverseProxyTarget>> reverse_proxy_upstreams_for_request(
+    const rimau::http::Request& request,
+    const ServerConfig& config)
+{
+    if (!config.virtual_hosts_enabled || config.virtual_hosts.empty()) {
+        return std::nullopt;
+    }
+
+    const auto rules = rimau::http::parse_virtual_host_rules(config.virtual_hosts);
+    const auto* rule = rimau::http::select_virtual_host_rule(request, rules);
+    if (!rule || rule->action != rimau::http::VirtualHostAction::reverse_proxy) {
+        return std::nullopt;
+    }
+
+    return rule->upstreams;
+}
+
+struct ReverseProxyTcpConnect {
+    UniqueFd fd;
+    bool connected = false;
+};
+
+ReverseProxyTcpConnect start_reverse_proxy_tcp_connect(const rimau::http::ReverseProxyTarget& upstream)
+{
+    addrinfo hints {};
+    hints.ai_family = AF_UNSPEC;
+    hints.ai_socktype = SOCK_STREAM;
+
+    addrinfo* raw_results = nullptr;
+    const std::string port = std::to_string(upstream.port);
+    const int rc = getaddrinfo(upstream.host.c_str(), port.c_str(), &hints, &raw_results);
+    if (rc != 0) {
+        throw std::runtime_error(std::string("reverse proxy upstream address resolution failed: ") + gai_strerror(rc));
+    }
+
+    struct AddrInfoDeleter {
+        void operator()(addrinfo* value) const noexcept
+        {
+            if (value) {
+                freeaddrinfo(value);
+            }
+        }
+    };
+
+    std::unique_ptr<addrinfo, AddrInfoDeleter> results(raw_results);
+    std::string last_error = "no upstream address";
+    for (addrinfo* item = results.get(); item; item = item->ai_next) {
+        UniqueFd fd(socket(item->ai_family, item->ai_socktype | SOCK_NONBLOCK | SOCK_CLOEXEC, item->ai_protocol));
+        if (!fd.valid()) {
+            last_error = std::strerror(errno);
+            continue;
+        }
+
+        if (connect(fd.get(), item->ai_addr, item->ai_addrlen) == 0) {
+            return { std::move(fd), true };
+        }
+
+        if (errno == EINPROGRESS) {
+            return { std::move(fd), false };
+        }
+
+        last_error = std::strerror(errno);
+    }
+
+    throw std::runtime_error("reverse proxy upstream connect failed: " + last_error);
 }
 
 std::string json_escape(std::string_view value)
@@ -2183,8 +2222,17 @@ enum class ClientPhase {
     writing,
     websocket,
     websocket_proxy,
+    reverse_proxy,
     tls_shutdown,
     closed
+};
+
+enum class ReverseProxyStage {
+    idle,
+    connecting,
+    tls_handshake,
+    writing_request,
+    reading_response
 };
 
 struct Http2StreamState {
@@ -2260,6 +2308,7 @@ public:
     void prepare_for_pool() noexcept
     {
         close_websocket_upstream();
+        close_reverse_proxy_upstream();
         if (fd_ >= 0) {
             close(fd_);
         }
@@ -2288,9 +2337,25 @@ public:
         websocket_proxy_upstream_to_client_offset_ = 0;
         websocket_proxy_client_extra_events_ = 0;
         websocket_proxy_upstream_extra_events_ = 0;
+        reverse_proxy_request_.reset();
+        reverse_proxy_ordered_upstreams_.clear();
+        reverse_proxy_settings_ = {};
+        reverse_proxy_current_upstream_ = {};
+        reverse_proxy_upstream_request_.clear();
+        reverse_proxy_upstream_request_offset_ = 0;
+        reverse_proxy_response_buffer_.clear();
+        reverse_proxy_keep_alive_ = false;
+        reverse_proxy_body_mode_ = rimau::http::BodyMode::include;
+        reverse_proxy_stage_ = ReverseProxyStage::idle;
+        reverse_proxy_attempt_index_ = 0;
+        reverse_proxy_skipped_open_circuit_ = false;
+        reverse_proxy_attempted_upstream_ = false;
+        reverse_proxy_upstream_extra_events_ = 0;
+        reverse_proxy_stage_started_at_ = {};
         http2_active_ = false;
         http2_last_client_stream_id_ = 0;
         http2_streams_.clear();
+        http2_session_.reset();
         requests_served_ = 0;
         last_activity_ = {};
         request_started_at_ = {};
@@ -2356,6 +2421,18 @@ public:
             return true;
         }
 
+        if (phase_ == ClientPhase::reverse_proxy) {
+            const int timeout_seconds = reverse_proxy_stage_ == ReverseProxyStage::reading_response
+                ? config_->reverse_proxy_read_timeout_seconds
+                : config_->reverse_proxy_connect_timeout_seconds;
+            if (reverse_proxy_stage_started_at_.time_since_epoch().count() != 0
+                && now - reverse_proxy_stage_started_at_ >= std::chrono::seconds(timeout_seconds)) {
+                fail_reverse_proxy_attempt("upstream timeout");
+                return true;
+            }
+            return false;
+        }
+
         if (phase_ != ClientPhase::reading) {
             return false;
         }
@@ -2371,7 +2448,7 @@ public:
 
             if (request_started_at_.time_since_epoch().count() != 0
                 && now - request_started_at_ >= std::chrono::seconds(config_->request_timeout_seconds)) {
-                set_serialized_response(http2_goaway_frame(http2_enhance_your_calm, "HTTP/2 request timeout"), false);
+                set_serialized_response(rimau::protocol::http2::goaway_frame(rimau::protocol::http2::error_enhance_your_calm, "HTTP/2 request timeout"), false);
                 return true;
             }
 
@@ -2415,7 +2492,9 @@ public:
             return;
         }
 
-        if ((revents & (EPOLLERR | EPOLLHUP | EPOLLRDHUP)) != 0 && (revents & (EPOLLIN | EPOLLOUT)) == 0) {
+        if (phase_ != ClientPhase::reverse_proxy
+            && (revents & (EPOLLERR | EPOLLHUP | EPOLLRDHUP)) != 0
+            && (revents & (EPOLLIN | EPOLLOUT)) == 0) {
             close_now();
             return;
         }
@@ -2440,6 +2519,8 @@ public:
         case ClientPhase::websocket_proxy:
             handle_websocket_proxy_client(revents);
             break;
+        case ClientPhase::reverse_proxy:
+            break;
         case ClientPhase::tls_shutdown:
             do_tls_shutdown();
             break;
@@ -2450,12 +2531,17 @@ public:
 
     void handle_upstream(std::uint32_t revents)
     {
-        if (closed() || phase_ != ClientPhase::websocket_proxy) {
+        if (closed() || (phase_ != ClientPhase::websocket_proxy && phase_ != ClientPhase::reverse_proxy)) {
             return;
         }
 
         if ((revents & (EPOLLERR | EPOLLHUP | EPOLLRDHUP)) != 0 && (revents & (EPOLLIN | EPOLLOUT)) == 0) {
             close_now();
+            return;
+        }
+
+        if (phase_ == ClientPhase::reverse_proxy) {
+            handle_reverse_proxy_upstream(revents);
             return;
         }
 
@@ -2485,9 +2571,25 @@ private:
         websocket_upstream_tls_context_.reset();
     }
 
+    void close_reverse_proxy_upstream() noexcept
+    {
+        if (reverse_proxy_upstream_fd_ >= 0) {
+            if (epoll_fd_ >= 0 && reverse_proxy_upstream_registered_) {
+                epoll_ctl(epoll_fd_, EPOLL_CTL_DEL, reverse_proxy_upstream_fd_, nullptr);
+            }
+            close(reverse_proxy_upstream_fd_);
+        }
+        reverse_proxy_upstream_fd_ = -1;
+        reverse_proxy_upstream_registered_ = false;
+        reverse_proxy_upstream_tls_.reset();
+        reverse_proxy_upstream_tls_context_.reset();
+        reverse_proxy_upstream_extra_events_ = 0;
+    }
+
     void close_now() noexcept
     {
         close_websocket_upstream();
+        close_reverse_proxy_upstream();
         phase_ = ClientPhase::closed;
         events_ = 0;
     }
@@ -2518,6 +2620,21 @@ private:
         response_offset_ = 0;
         phase_ = ClientPhase::writing;
         events_ = EPOLLOUT;
+    }
+
+    void update_client_epoll_events()
+    {
+        if (epoll_fd_ < 0 || fd_ < 0 || closed()) {
+            return;
+        }
+
+        epoll_event event {};
+        event.events = events_ | EPOLLRDHUP;
+        event.data.ptr = token();
+        if (epoll_ctl(epoll_fd_, EPOLL_CTL_MOD, fd_, &event) < 0) {
+            log(LogLevel::warning, std::string("epoll_ctl MOD client failed: ") + std::strerror(errno));
+            close_now();
+        }
     }
 
     void set_websocket_handshake_response(rimau::http::Response response)
@@ -2908,92 +3025,89 @@ private:
             return false;
         }
 
-        const auto preface = h2::client_connection_preface;
-        if (request_buffer_.empty()) {
+        bool request_allowed = true;
+        if (config_->http2_enabled && security_state_) {
+            request_allowed = security_state_->allow_request(client_ip_, *config_);
+        }
+
+        auto result = http2_session_.accept_preface(
+            request_buffer_,
+            config_->max_request_bytes,
+            config_->http2_enabled,
+            request_allowed);
+
+        switch (result.status) {
+        case h2::PrefaceStatus::not_http2:
             return false;
-        }
-
-        const auto comparable = std::min(request_buffer_.size(), preface.size());
-        if (std::string_view(request_buffer_).substr(0, comparable) != preface.substr(0, comparable)) {
-            return false;
-        }
-
-        if (request_buffer_.size() < preface.size()) {
+        case h2::PrefaceStatus::need_more:
+            return true;
+        case h2::PrefaceStatus::rejected:
+            request_started_at_ = {};
+            body_started_at_ = {};
+            waiting_for_body_ = false;
+            set_serialized_response(std::move(result.output), result.keep_connection);
+            return true;
+        case h2::PrefaceStatus::accepted:
+            request_started_at_ = {};
+            body_started_at_ = {};
+            waiting_for_body_ = false;
+            http2_active_ = true;
+            set_serialized_response(std::move(result.output), result.keep_connection);
+            {
+                const std::string transport = http2_tls_selected_ ? "TLS ALPN h2" : "h2c";
+                log(LogLevel::info, "worker " + std::to_string(worker_id_) + " accepted HTTP/2 " + transport + " preface and entered native session mode");
+            }
             return true;
         }
 
-        if (request_buffer_.size() > config_->max_request_bytes) {
-            request_buffer_.clear();
-            set_serialized_response(http2_goaway_frame(0x1, "HTTP/2 preface exceeded Rimau request limit"), false);
-            return true;
-        }
-
-        if (request_buffer_.size() < preface.size() + 9) {
-            return true;
-        }
-
-        const auto frame_bytes = std::string_view(request_buffer_).substr(preface.size());
-        const auto parsed = h2::parse_frame(frame_bytes);
-        if (parsed.incomplete) {
-            return true;
-        }
-        if (!parsed.ok || parsed.frame.type != static_cast<std::uint8_t>(h2::FrameType::settings) || parsed.frame.stream_id != 0) {
-            request_buffer_.clear();
-            set_serialized_response(http2_goaway_frame(0x1, "Rimau expected an HTTP/2 SETTINGS frame after the preface"), false);
-            return true;
-        }
-
-        request_buffer_.erase(0, preface.size() + parsed.consumed);
-        request_started_at_ = {};
-        body_started_at_ = {};
-        waiting_for_body_ = false;
-
-        if (!config_->http2_enabled) {
-            set_serialized_response(http2_goaway_frame(0xd, "HTTP/2 is disabled in Rimau SQLite config"), false);
-            return true;
-        }
-
-        if (security_state_ && !security_state_->allow_request(client_ip_, *config_)) {
-            set_serialized_response(http2_goaway_frame(0xb, "Rimau HTTP/2 rate limit exceeded"), false);
-            return true;
-        }
-
-        http2_active_ = true;
-        std::string response;
-        response += http2_settings_frame(false);
-        response += http2_settings_frame(true);
-        set_serialized_response(std::move(response), true);
-        const std::string transport = http2_tls_selected_ ? "TLS ALPN h2" : "h2c";
-        log(LogLevel::info, "worker " + std::to_string(worker_id_) + " accepted HTTP/2 " + transport + " preface and entered partial request-serving mode");
-        return true;
+        return false;
     }
 
     void process_http2_frames()
     {
-        namespace h2 = rimau::protocol::http2;
-
         while (phase_ == ClientPhase::reading && !request_buffer_.empty()) {
-            if (request_buffer_.size() > config_->max_request_bytes) {
-                request_buffer_.clear();
-                fail_http2_connection(http2_enhance_your_calm, "HTTP/2 frame buffer exceeded Rimau request limit");
+            auto result = http2_session_.process_input(request_buffer_, config_->max_request_bytes);
+            const bool no_progress = result.output.empty() && !result.close_now && !result.completed_stream && !result.error_response;
+            if (!handle_http2_session_result(std::move(result))) {
                 return;
             }
-
-            const auto parsed = h2::parse_frame(std::string_view(request_buffer_));
-            if (parsed.incomplete) {
-                return;
-            }
-            if (!parsed.ok) {
-                request_buffer_.clear();
-                fail_http2_connection(http2_protocol_error, parsed.error.empty() ? "invalid HTTP/2 frame" : parsed.error);
-                return;
-            }
-
-            request_buffer_.erase(0, parsed.consumed);
-            if (!handle_http2_frame(parsed.frame)) {
+            if (no_progress) {
                 return;
             }
         }
+    }
+
+    bool handle_http2_session_result(rimau::protocol::http2::SessionResult result)
+    {
+        if (!result.warning.empty()) {
+            log(LogLevel::warning, result.warning);
+        }
+        if (result.close_now) {
+            close_now();
+            return false;
+        }
+        if (result.error_response) {
+            set_serialized_response(
+                result.output + rimau::protocol::http2::serialize_response(
+                    result.error_stream_id,
+                    *result.error_response,
+                    rimau::http::BodyMode::include,
+                    response_serialization_options(*config_)),
+                true);
+            return false;
+        }
+        if (result.completed_stream) {
+            dispatch_http2_request(
+                result.completed_stream->stream_id,
+                std::move(result.completed_stream->request),
+                std::move(result.output));
+            return false;
+        }
+        if (!result.output.empty()) {
+            set_serialized_response(std::move(result.output), result.keep_connection);
+            return false;
+        }
+        return true;
     }
 
     bool handle_http2_frame(const rimau::protocol::http2::Frame& frame)
@@ -3311,6 +3425,71 @@ private:
         set_serialized_response(std::move(payload), keep_connection);
     }
 
+    void dispatch_http2_request(std::uint32_t stream_id, rimau::http::Request request, std::string prefix)
+    {
+        if (security_state_ && !security_state_->allow_request(client_ip_, *config_)) {
+            set_serialized_response(
+                prefix + rimau::protocol::http2::serialize_response(
+                    stream_id,
+                    rimau::http::text_response(429, "Too Many Requests\n"),
+                    rimau::http::BodyMode::include,
+                    response_serialization_options(*config_)),
+                true);
+            return;
+        }
+
+        if (auto waf_response = inspect_waf(request)) {
+            set_serialized_response(
+                prefix + rimau::protocol::http2::serialize_response(
+                    stream_id,
+                    *waf_response,
+                    rimau::http::BodyMode::include,
+                    response_serialization_options(*config_)),
+                true);
+            return;
+        }
+
+        ++requests_served_;
+
+        rimau::http::VirtualHostHandlerFactory handler_factory(
+            config_->document_root,
+            config_->virtual_hosts_enabled ? config_->virtual_hosts : "",
+            reverse_proxy_settings(),
+            static_file_options());
+        BufferedResponseSink downstream;
+        rimau::http::Transaction transaction(static_cast<std::uint64_t>(requests_served_), request);
+        transaction.dispatch(handler_factory, downstream);
+
+        if (!downstream.sent()) {
+            set_serialized_response(
+                prefix + rimau::protocol::http2::serialize_response(
+                    stream_id,
+                    rimau::http::text_response(500, "Internal Server Error\n"),
+                    rimau::http::BodyMode::include,
+                    response_serialization_options(*config_)),
+                true);
+            return;
+        }
+
+        log(
+            LogLevel::info,
+            "worker " + std::to_string(worker_id_) + " h2 "
+                + transaction.request().method + " " + transaction.request().target + " -> " + std::to_string(downstream.last_status()));
+
+        bool keep_connection = true;
+        std::string payload = std::move(prefix);
+        payload += rimau::protocol::http2::serialize_response(
+            stream_id,
+            downstream.response(),
+            downstream.body_mode(),
+            response_serialization_options(*config_));
+        if (config_->http_keep_alive_max_requests > 0 && requests_served_ >= config_->http_keep_alive_max_requests) {
+            payload += rimau::protocol::http2::goaway_frame(rimau::protocol::http2::error_no_error, "Rimau HTTP/2 max requests reached");
+            keep_connection = false;
+        }
+        set_serialized_response(std::move(payload), keep_connection);
+    }
+
     rimau::http::ReverseProxySettings reverse_proxy_settings() const
     {
         rimau::http::ReverseProxySettings settings;
@@ -3318,6 +3497,7 @@ private:
         settings.read_timeout_seconds = config_->reverse_proxy_read_timeout_seconds;
         settings.max_response_bytes = config_->reverse_proxy_max_response_bytes;
         settings.retry_count = config_->reverse_proxy_retry_count;
+        settings.load_balancing_policy = rimau::http::parse_reverse_proxy_load_balancing_policy(config_->reverse_proxy_load_balancing_policy);
         settings.verify_tls_upstream = config_->reverse_proxy_tls_verify_upstream;
         settings.circuit_breaker_enabled = config_->reverse_proxy_circuit_breaker_enabled;
         settings.circuit_breaker_failure_threshold = config_->reverse_proxy_circuit_breaker_failure_threshold;
@@ -3439,7 +3619,7 @@ private:
         bool skipped_open_circuit = false;
         bool attempted_upstream = false;
 
-        for (const auto& upstream : ordered_websocket_proxy_upstreams(*upstreams, settings.retry_count)) {
+        for (const auto& upstream : rimau::http::ordered_reverse_proxy_upstreams(request, *upstreams, settings)) {
             if (!rimau::http::reverse_proxy_upstream_available(upstream, settings)) {
                 skipped_open_circuit = true;
                 continue;
@@ -3498,6 +3678,412 @@ private:
         return true;
     }
 
+    void register_reverse_proxy_upstream(std::uint32_t events)
+    {
+        if (reverse_proxy_upstream_fd_ < 0 || epoll_fd_ < 0) {
+            throw std::runtime_error("reverse proxy upstream cannot be registered without an epoll fd");
+        }
+
+        epoll_event event {};
+        event.events = events | EPOLLRDHUP;
+        event.data.ptr = upstream_token();
+
+        const int operation = reverse_proxy_upstream_registered_ ? EPOLL_CTL_MOD : EPOLL_CTL_ADD;
+        if (epoll_ctl(epoll_fd_, operation, reverse_proxy_upstream_fd_, &event) < 0) {
+            throw std::runtime_error(std::string("epoll_ctl reverse proxy upstream failed: ") + std::strerror(errno));
+        }
+        reverse_proxy_upstream_registered_ = true;
+    }
+
+    std::uint32_t reverse_proxy_stage_events() const noexcept
+    {
+        switch (reverse_proxy_stage_) {
+        case ReverseProxyStage::connecting:
+            return EPOLLOUT;
+        case ReverseProxyStage::tls_handshake:
+            return reverse_proxy_upstream_extra_events_;
+        case ReverseProxyStage::writing_request:
+            return EPOLLOUT | reverse_proxy_upstream_extra_events_;
+        case ReverseProxyStage::reading_response:
+            return EPOLLIN | reverse_proxy_upstream_extra_events_;
+        case ReverseProxyStage::idle:
+            return 0;
+        }
+        return 0;
+    }
+
+    void update_reverse_proxy_upstream_events()
+    {
+        if (phase_ != ClientPhase::reverse_proxy || reverse_proxy_upstream_fd_ < 0) {
+            return;
+        }
+        register_reverse_proxy_upstream(reverse_proxy_stage_events());
+    }
+
+    bool try_start_reverse_proxy(const rimau::http::Request& request, bool keep_alive)
+    {
+        std::optional<std::vector<rimau::http::ReverseProxyTarget>> upstreams;
+        try {
+            upstreams = reverse_proxy_upstreams_for_request(request, *config_);
+        } catch (const std::exception& error) {
+            log(LogLevel::warning, std::string("reverse proxy virtual host config failed: ") + error.what());
+            set_response(rimau::http::text_response(500, "Internal Server Error\n"), rimau::http::BodyMode::include, false);
+            return true;
+        }
+
+        if (!upstreams) {
+            return false;
+        }
+
+        reverse_proxy_request_ = request;
+        reverse_proxy_settings_ = reverse_proxy_settings();
+        reverse_proxy_ordered_upstreams_ = rimau::http::ordered_reverse_proxy_upstreams(request, *upstreams, reverse_proxy_settings_);
+        reverse_proxy_keep_alive_ = keep_alive;
+        reverse_proxy_body_mode_ = request.method == "HEAD" ? rimau::http::BodyMode::headers_only : rimau::http::BodyMode::include;
+        reverse_proxy_attempt_index_ = 0;
+        reverse_proxy_skipped_open_circuit_ = false;
+        reverse_proxy_attempted_upstream_ = false;
+        reverse_proxy_response_buffer_.clear();
+        reverse_proxy_upstream_request_.clear();
+        reverse_proxy_upstream_request_offset_ = 0;
+        reverse_proxy_stage_ = ReverseProxyStage::idle;
+        reverse_proxy_stage_started_at_ = std::chrono::steady_clock::now();
+        phase_ = ClientPhase::reverse_proxy;
+        events_ = 0;
+
+        start_next_reverse_proxy_attempt();
+        return true;
+    }
+
+    void start_next_reverse_proxy_attempt()
+    {
+        while (phase_ == ClientPhase::reverse_proxy && reverse_proxy_attempt_index_ < reverse_proxy_ordered_upstreams_.size()) {
+            const auto upstream = reverse_proxy_ordered_upstreams_[reverse_proxy_attempt_index_++];
+            if (!rimau::http::reverse_proxy_upstream_available(upstream, reverse_proxy_settings_)) {
+                reverse_proxy_skipped_open_circuit_ = true;
+                continue;
+            }
+
+            reverse_proxy_attempted_upstream_ = true;
+            try {
+                close_reverse_proxy_upstream();
+                reverse_proxy_current_upstream_ = upstream;
+                reverse_proxy_upstream_request_ = rimau::http::build_reverse_proxy_upstream_request(*reverse_proxy_request_, upstream);
+                reverse_proxy_upstream_request_offset_ = 0;
+                reverse_proxy_response_buffer_.clear();
+                auto connect_result = start_reverse_proxy_tcp_connect(upstream);
+                reverse_proxy_upstream_fd_ = connect_result.fd.release();
+                reverse_proxy_stage_ = ReverseProxyStage::connecting;
+                reverse_proxy_stage_started_at_ = std::chrono::steady_clock::now();
+                register_reverse_proxy_upstream(EPOLLOUT);
+                if (connect_result.connected) {
+                    finish_reverse_proxy_tcp_connect();
+                }
+                return;
+            } catch (const std::exception& error) {
+                log(LogLevel::warning, std::string("reverse proxy upstream setup failed: ") + error.what());
+                rimau::http::record_reverse_proxy_upstream_failure(upstream, reverse_proxy_settings_);
+                close_reverse_proxy_upstream();
+                continue;
+            }
+        }
+
+        finish_reverse_proxy_failure_response();
+    }
+
+    void finish_reverse_proxy_failure_response()
+    {
+        close_reverse_proxy_upstream();
+        if (!reverse_proxy_attempted_upstream_ && reverse_proxy_skipped_open_circuit_) {
+            auto response = rimau::http::text_response(503, "Service Unavailable\n");
+            response.headers["retry-after"] = std::to_string(reverse_proxy_settings_.circuit_breaker_cooldown_seconds);
+            set_response(std::move(response), rimau::http::BodyMode::include, reverse_proxy_keep_alive_);
+            update_client_epoll_events();
+            return;
+        }
+
+        set_response(rimau::http::text_response(502, "Bad Gateway\n"), rimau::http::BodyMode::include, reverse_proxy_keep_alive_);
+        update_client_epoll_events();
+    }
+
+    void fail_reverse_proxy_attempt(std::string_view reason)
+    {
+        if (phase_ != ClientPhase::reverse_proxy) {
+            return;
+        }
+        log(LogLevel::warning, "reverse proxy upstream failed: " + std::string(reason));
+        rimau::http::record_reverse_proxy_upstream_failure(reverse_proxy_current_upstream_, reverse_proxy_settings_);
+        close_reverse_proxy_upstream();
+        start_next_reverse_proxy_attempt();
+    }
+
+    void finish_reverse_proxy_tcp_connect()
+    {
+        int socket_error = 0;
+        socklen_t socket_error_length = sizeof(socket_error);
+        if (getsockopt(reverse_proxy_upstream_fd_, SOL_SOCKET, SO_ERROR, &socket_error, &socket_error_length) < 0) {
+            fail_reverse_proxy_attempt(std::strerror(errno));
+            return;
+        }
+        if (socket_error != 0) {
+            fail_reverse_proxy_attempt(std::strerror(socket_error));
+            return;
+        }
+
+        if (reverse_proxy_current_upstream_.scheme == "https") {
+            try {
+                start_reverse_proxy_tls_handshake();
+            } catch (const std::exception& error) {
+                fail_reverse_proxy_attempt(error.what());
+            }
+            return;
+        }
+
+        reverse_proxy_stage_ = ReverseProxyStage::writing_request;
+        reverse_proxy_stage_started_at_ = std::chrono::steady_clock::now();
+        reverse_proxy_upstream_extra_events_ = 0;
+        flush_reverse_proxy_request();
+        if (!closed() && phase_ == ClientPhase::reverse_proxy) {
+            update_reverse_proxy_upstream_events();
+        }
+    }
+
+    void start_reverse_proxy_tls_handshake()
+    {
+        reverse_proxy_upstream_tls_context_ = create_websocket_upstream_tls_context(reverse_proxy_settings_.verify_tls_upstream);
+        reverse_proxy_upstream_tls_.reset(SSL_new(reverse_proxy_upstream_tls_context_.get()));
+        if (!reverse_proxy_upstream_tls_) {
+            throw std::runtime_error("cannot create reverse proxy upstream TLS connection");
+        }
+        if (SSL_set_fd(reverse_proxy_upstream_tls_.get(), reverse_proxy_upstream_fd_) != 1) {
+            throw std::runtime_error("cannot attach reverse proxy upstream TLS socket");
+        }
+        SSL_set_mode(reverse_proxy_upstream_tls_.get(), SSL_MODE_ENABLE_PARTIAL_WRITE | SSL_MODE_ACCEPT_MOVING_WRITE_BUFFER);
+        if (should_send_upstream_sni(reverse_proxy_current_upstream_.host)) {
+            SSL_set_tlsext_host_name(reverse_proxy_upstream_tls_.get(), reverse_proxy_current_upstream_.host.c_str());
+        }
+        if (reverse_proxy_settings_.verify_tls_upstream) {
+            configure_websocket_upstream_identity_verification(reverse_proxy_upstream_tls_.get(), reverse_proxy_current_upstream_);
+        }
+        SSL_set_connect_state(reverse_proxy_upstream_tls_.get());
+        reverse_proxy_stage_ = ReverseProxyStage::tls_handshake;
+        reverse_proxy_stage_started_at_ = std::chrono::steady_clock::now();
+        drive_reverse_proxy_tls_handshake();
+    }
+
+    void drive_reverse_proxy_tls_handshake()
+    {
+        const int result = SSL_connect(reverse_proxy_upstream_tls_.get());
+        if (result == 1) {
+            if (reverse_proxy_settings_.verify_tls_upstream
+                && SSL_get_verify_result(reverse_proxy_upstream_tls_.get()) != X509_V_OK) {
+                fail_reverse_proxy_attempt("upstream TLS certificate verification failed");
+                return;
+            }
+            reverse_proxy_stage_ = ReverseProxyStage::writing_request;
+            reverse_proxy_stage_started_at_ = std::chrono::steady_clock::now();
+            reverse_proxy_upstream_extra_events_ = 0;
+            flush_reverse_proxy_request();
+            if (!closed() && phase_ == ClientPhase::reverse_proxy) {
+                update_reverse_proxy_upstream_events();
+            }
+            return;
+        }
+
+        const int error = SSL_get_error(reverse_proxy_upstream_tls_.get(), result);
+        if (error == SSL_ERROR_WANT_READ || error == SSL_ERROR_WANT_WRITE) {
+            reverse_proxy_upstream_extra_events_ = event_for_ssl_error(error);
+            update_reverse_proxy_upstream_events();
+            return;
+        }
+
+        fail_reverse_proxy_attempt("upstream TLS handshake failed");
+    }
+
+    void handle_reverse_proxy_upstream(std::uint32_t revents)
+    {
+        if ((revents & EPOLLERR) != 0) {
+            fail_reverse_proxy_attempt("upstream socket error");
+            return;
+        }
+
+        if (reverse_proxy_stage_ == ReverseProxyStage::connecting && (revents & EPOLLOUT) != 0) {
+            finish_reverse_proxy_tcp_connect();
+            return;
+        }
+
+        if (reverse_proxy_stage_ == ReverseProxyStage::tls_handshake && (revents & (EPOLLIN | EPOLLOUT)) != 0) {
+            drive_reverse_proxy_tls_handshake();
+            return;
+        }
+
+        if (reverse_proxy_stage_ == ReverseProxyStage::writing_request && (revents & (EPOLLIN | EPOLLOUT)) != 0) {
+            flush_reverse_proxy_request();
+            if (closed() || phase_ != ClientPhase::reverse_proxy) {
+                return;
+            }
+        }
+
+        if (reverse_proxy_stage_ == ReverseProxyStage::reading_response && (revents & (EPOLLIN | EPOLLHUP | EPOLLRDHUP)) != 0) {
+            read_reverse_proxy_response();
+            if (closed() || phase_ != ClientPhase::reverse_proxy) {
+                return;
+            }
+        }
+
+        if (phase_ == ClientPhase::reverse_proxy) {
+            update_reverse_proxy_upstream_events();
+        }
+    }
+
+    void flush_reverse_proxy_request()
+    {
+        while (reverse_proxy_upstream_request_offset_ < reverse_proxy_upstream_request_.size()) {
+            if (reverse_proxy_upstream_tls_) {
+                const auto remaining = static_cast<int>(std::min<std::size_t>(
+                    reverse_proxy_upstream_request_.size() - reverse_proxy_upstream_request_offset_,
+                    16 * 1024));
+                const int sent = SSL_write(
+                    reverse_proxy_upstream_tls_.get(),
+                    reverse_proxy_upstream_request_.data() + reverse_proxy_upstream_request_offset_,
+                    remaining);
+                if (sent > 0) {
+                    reverse_proxy_upstream_request_offset_ += static_cast<std::size_t>(sent);
+                    last_activity_ = std::chrono::steady_clock::now();
+                    reverse_proxy_upstream_extra_events_ = 0;
+                    continue;
+                }
+
+                const int error = SSL_get_error(reverse_proxy_upstream_tls_.get(), sent);
+                if (error == SSL_ERROR_WANT_READ || error == SSL_ERROR_WANT_WRITE) {
+                    reverse_proxy_upstream_extra_events_ = event_for_ssl_error(error);
+                    return;
+                }
+                fail_reverse_proxy_attempt("upstream TLS write failed");
+                return;
+            }
+
+            const ssize_t sent = send(
+                reverse_proxy_upstream_fd_,
+                reverse_proxy_upstream_request_.data() + reverse_proxy_upstream_request_offset_,
+                reverse_proxy_upstream_request_.size() - reverse_proxy_upstream_request_offset_,
+                MSG_NOSIGNAL);
+            if (sent > 0) {
+                reverse_proxy_upstream_request_offset_ += static_cast<std::size_t>(sent);
+                last_activity_ = std::chrono::steady_clock::now();
+                reverse_proxy_upstream_extra_events_ = 0;
+                continue;
+            }
+            if (sent < 0 && would_block()) {
+                return;
+            }
+            fail_reverse_proxy_attempt(std::strerror(errno));
+            return;
+        }
+
+        reverse_proxy_stage_ = ReverseProxyStage::reading_response;
+        reverse_proxy_stage_started_at_ = std::chrono::steady_clock::now();
+        reverse_proxy_upstream_extra_events_ = 0;
+    }
+
+    void read_reverse_proxy_response()
+    {
+        if (reverse_proxy_upstream_tls_) {
+            read_tls_reverse_proxy_response();
+        } else {
+            read_plain_reverse_proxy_response();
+        }
+    }
+
+    bool append_reverse_proxy_response(std::string_view chunk)
+    {
+        if (reverse_proxy_response_buffer_.size() + chunk.size() > reverse_proxy_settings_.max_response_bytes) {
+            fail_reverse_proxy_attempt("upstream response too large");
+            return false;
+        }
+        reverse_proxy_response_buffer_.append(chunk);
+        last_activity_ = std::chrono::steady_clock::now();
+        return true;
+    }
+
+    void read_plain_reverse_proxy_response()
+    {
+        std::array<char, 8192> chunk {};
+        while (phase_ == ClientPhase::reverse_proxy) {
+            const ssize_t received = recv(reverse_proxy_upstream_fd_, chunk.data(), chunk.size(), 0);
+            if (received > 0) {
+                if (!append_reverse_proxy_response(std::string_view(chunk.data(), static_cast<std::size_t>(received)))) {
+                    return;
+                }
+                continue;
+            }
+
+            if (received == 0) {
+                finish_reverse_proxy_response();
+                return;
+            }
+
+            if (would_block()) {
+                reverse_proxy_upstream_extra_events_ = 0;
+                return;
+            }
+
+            fail_reverse_proxy_attempt(std::strerror(errno));
+            return;
+        }
+    }
+
+    void read_tls_reverse_proxy_response()
+    {
+        std::array<char, 8192> chunk {};
+        while (phase_ == ClientPhase::reverse_proxy) {
+            const int received = SSL_read(reverse_proxy_upstream_tls_.get(), chunk.data(), static_cast<int>(chunk.size()));
+            if (received > 0) {
+                if (!append_reverse_proxy_response(std::string_view(chunk.data(), static_cast<std::size_t>(received)))) {
+                    return;
+                }
+                reverse_proxy_upstream_extra_events_ = 0;
+                continue;
+            }
+
+            const int error = SSL_get_error(reverse_proxy_upstream_tls_.get(), received);
+            if (error == SSL_ERROR_ZERO_RETURN) {
+                finish_reverse_proxy_response();
+                return;
+            }
+            if (error == SSL_ERROR_WANT_READ || error == SSL_ERROR_WANT_WRITE) {
+                reverse_proxy_upstream_extra_events_ = event_for_ssl_error(error);
+                return;
+            }
+            if ((error == SSL_ERROR_SYSCALL || error == SSL_ERROR_SSL) && !reverse_proxy_response_buffer_.empty()) {
+                finish_reverse_proxy_response();
+                return;
+            }
+
+            fail_reverse_proxy_attempt("upstream TLS read failed");
+            return;
+        }
+    }
+
+    void finish_reverse_proxy_response()
+    {
+        try {
+            auto response = rimau::http::parse_reverse_proxy_upstream_response(std::move(reverse_proxy_response_buffer_));
+            rimau::http::record_reverse_proxy_upstream_success(reverse_proxy_current_upstream_, reverse_proxy_settings_);
+            close_reverse_proxy_upstream();
+            const auto target = reverse_proxy_request_ ? reverse_proxy_request_->target : std::string {};
+            log(
+                LogLevel::info,
+                "worker " + std::to_string(worker_id_) + " proxy "
+                    + target + " -> " + reverse_proxy_current_upstream_.scheme + "://" + reverse_proxy_current_upstream_.authority
+                    + " -> " + std::to_string(response.status));
+            set_response(std::move(response), reverse_proxy_body_mode_, reverse_proxy_keep_alive_);
+            update_client_epoll_events();
+        } catch (const std::exception& error) {
+            fail_reverse_proxy_attempt(error.what());
+        }
+    }
+
     void process_request(std::string raw_request)
     {
         const auto parsed = rimau::http::parse_request(raw_request);
@@ -3525,6 +4111,10 @@ private:
         bool keep_alive = request_should_keep_alive(request);
         if (requests_served_ >= config_->http_keep_alive_max_requests) {
             keep_alive = false;
+        }
+
+        if (try_start_reverse_proxy(request, keep_alive)) {
+            return;
         }
 
         rimau::http::VirtualHostHandlerFactory handler_factory(
@@ -4231,12 +4821,16 @@ private:
     bool http2_tls_selected_ = false;
     std::unique_ptr<SSL_CTX, SslCtxDeleter> websocket_upstream_tls_context_;
     std::unique_ptr<SSL, SslDeleter> websocket_upstream_tls_;
+    std::unique_ptr<SSL_CTX, SslCtxDeleter> reverse_proxy_upstream_tls_context_;
+    std::unique_ptr<SSL, SslDeleter> reverse_proxy_upstream_tls_;
     ClientPhase phase_ = ClientPhase::closed;
     std::uint32_t events_ = 0;
     EventToken token_;
     EventToken upstream_token_;
     int websocket_upstream_fd_ = -1;
     bool websocket_upstream_registered_ = false;
+    int reverse_proxy_upstream_fd_ = -1;
+    bool reverse_proxy_upstream_registered_ = false;
     std::string request_buffer_;
     std::string response_buffer_;
     std::size_t response_offset_ = 0;
@@ -4250,9 +4844,25 @@ private:
     std::size_t websocket_proxy_upstream_to_client_offset_ = 0;
     std::uint32_t websocket_proxy_client_extra_events_ = 0;
     std::uint32_t websocket_proxy_upstream_extra_events_ = 0;
+    std::optional<rimau::http::Request> reverse_proxy_request_;
+    std::vector<rimau::http::ReverseProxyTarget> reverse_proxy_ordered_upstreams_;
+    rimau::http::ReverseProxySettings reverse_proxy_settings_;
+    rimau::http::ReverseProxyTarget reverse_proxy_current_upstream_;
+    std::string reverse_proxy_upstream_request_;
+    std::size_t reverse_proxy_upstream_request_offset_ = 0;
+    std::string reverse_proxy_response_buffer_;
+    bool reverse_proxy_keep_alive_ = false;
+    rimau::http::BodyMode reverse_proxy_body_mode_ = rimau::http::BodyMode::include;
+    ReverseProxyStage reverse_proxy_stage_ = ReverseProxyStage::idle;
+    std::size_t reverse_proxy_attempt_index_ = 0;
+    bool reverse_proxy_skipped_open_circuit_ = false;
+    bool reverse_proxy_attempted_upstream_ = false;
+    std::uint32_t reverse_proxy_upstream_extra_events_ = 0;
+    std::chrono::steady_clock::time_point reverse_proxy_stage_started_at_;
     bool http2_active_ = false;
     std::uint32_t http2_last_client_stream_id_ = 0;
     std::unordered_map<std::uint32_t, Http2StreamState> http2_streams_;
+    rimau::protocol::http2::ServerSession http2_session_;
     std::unique_ptr<Http1BodyStreamState> http1_body_stream_;
     int requests_served_ = 0;
     std::chrono::steady_clock::time_point last_activity_;

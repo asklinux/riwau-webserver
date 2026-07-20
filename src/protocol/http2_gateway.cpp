@@ -33,21 +33,21 @@ bool alpn_contains(std::string_view protocols, std::string_view expected)
 
 std::string http2_status()
 {
-    return "partial: HTTP/2 frame codec, SETTINGS/PING handling, non-Huffman static-table HPACK basics, cleartext h2c request serving, and TLS ALPN h2 request serving exist; production stream/session flow control is not complete";
+    return "implemented: native HTTP/2 h2c and TLS ALPN h2 request serving with frame codec, SETTINGS/PING/RST/GOAWAY handling, HPACK Huffman and dynamic table decoding, CONTINUATION assembly, stream lifecycle basics, inbound flow-control accounting, and real-client curl coverage";
 }
 
 std::string http2_status(const rimau::core::ServerConfig& config)
 {
     if (!config.http2_enabled) {
-        return "disabled in SQLite config; HTTP/2 frame codec and h2c request serving exist but are not enabled";
+        return "disabled in SQLite config; native HTTP/2 h2c and TLS ALPN h2 request serving exist but are not enabled";
     }
 
     if (!config.tls_enabled) {
-        return "enabled in SQLite config with partial h2c prior-knowledge request serving: Rimau accepts client preface, parses SETTINGS/HEADERS/DATA, and responds with HTTP/2 HEADERS/DATA frames for the shared handler pipeline";
+        return "enabled in SQLite config with native h2c prior-knowledge request serving: Rimau accepts client preface, parses SETTINGS/HEADERS/CONTINUATION/DATA, decodes HPACK Huffman/dynamic table entries, applies inbound flow-control accounting, and responds with HTTP/2 HEADERS/DATA frames through the shared handler pipeline";
     }
 
     if (alpn_contains(config.tls_alpn_protocols, "h2")) {
-        return "enabled in SQLite config with partial TLS ALPN h2 request serving: Rimau negotiates h2, accepts the client preface, parses SETTINGS/HEADERS/DATA, and responds with HTTP/2 HEADERS/DATA frames for the shared handler pipeline";
+        return "enabled in SQLite config with native TLS ALPN h2 request serving: Rimau negotiates h2, accepts the client preface, parses SETTINGS/HEADERS/CONTINUATION/DATA, decodes HPACK Huffman/dynamic table entries, applies inbound flow-control accounting, and responds with HTTP/2 HEADERS/DATA frames through the shared handler pipeline";
     }
 
     return "enabled in SQLite config, but TLS ALPN h2 is not advertised by tls_alpn_protocols; cleartext h2c request serving exists only when TLS is disabled";

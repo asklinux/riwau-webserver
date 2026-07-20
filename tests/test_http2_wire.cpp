@@ -87,6 +87,28 @@ int main()
     assert(decoded_incremental_literal[0].name == ":authority");
     assert(decoded_incremental_literal[0].value == "rimau.example");
 
+    std::string decoded_huffman;
+    const std::vector<std::uint8_t> huffman_www_example {
+        0x8c, 0xf1, 0xe3, 0xc2, 0xe5, 0xf2, 0x3a, 0x6b, 0xa0, 0xab, 0x90, 0xf4, 0xff,
+    };
+    const auto huffman_consumed = hpack_decode_string(huffman_www_example, 0, decoded_huffman);
+    assert(huffman_consumed == huffman_www_example.size());
+    assert(decoded_huffman == "www.example.com");
+
+    HpackDecoder decoder;
+    const std::vector<std::uint8_t> indexed_authority_huffman {
+        0x41, 0x8c, 0xf1, 0xe3, 0xc2, 0xe5, 0xf2, 0x3a, 0x6b, 0xa0, 0xab, 0x90, 0xf4, 0xff,
+    };
+    const auto decoded_dynamic_insert = decoder.decode_header_block(indexed_authority_huffman);
+    assert(decoded_dynamic_insert.size() == 1);
+    assert(decoded_dynamic_insert[0].name == ":authority");
+    assert(decoded_dynamic_insert[0].value == "www.example.com");
+    assert(decoder.table_size() > 0);
+    const auto decoded_dynamic_reference = decoder.decode_header_block({ 0xbe });
+    assert(decoded_dynamic_reference.size() == 1);
+    assert(decoded_dynamic_reference[0].name == ":authority");
+    assert(decoded_dynamic_reference[0].value == "www.example.com");
+
     const auto incomplete = parse_frame(std::string_view(reinterpret_cast<const char*>(headers_wire.data()), 8));
     assert(!incomplete.ok);
     assert(incomplete.incomplete);

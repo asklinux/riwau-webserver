@@ -9,6 +9,7 @@
 #include <stdexcept>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace {
 
@@ -226,6 +227,42 @@ int main()
         settings.circuit_breaker_cooldown_seconds = 60;
         rimau::http::record_reverse_proxy_upstream_failure(upstream, settings);
         assert(rimau::http::reverse_proxy_upstream_available(upstream, settings));
+    }
+
+    {
+        const auto upstreams = rimau::http::parse_reverse_proxy_targets(
+            "http://127.0.0.1:19090/a,http://127.0.0.1:19091/b,http://127.0.0.1:19092/c");
+        auto request = make_request("api.test");
+        request.target = "/users?id=7";
+
+        rimau::http::ReverseProxySettings settings;
+        settings.retry_count = 2;
+        settings.load_balancing_policy = rimau::http::ReverseProxyLoadBalancingPolicy::failover;
+        auto failover = rimau::http::ordered_reverse_proxy_upstreams(request, upstreams, settings);
+        assert(failover.size() == 3);
+        assert(failover[0].port == 19090);
+        assert(failover[1].port == 19091);
+        assert(failover[2].port == 19092);
+
+        settings.load_balancing_policy = rimau::http::ReverseProxyLoadBalancingPolicy::round_robin;
+        auto first_round = rimau::http::ordered_reverse_proxy_upstreams(request, upstreams, settings);
+        auto second_round = rimau::http::ordered_reverse_proxy_upstreams(request, upstreams, settings);
+        assert(first_round.size() == 3);
+        assert(second_round.size() == 3);
+        assert(first_round[1].port == second_round[0].port);
+
+        settings.load_balancing_policy = rimau::http::ReverseProxyLoadBalancingPolicy::stable_hash;
+        auto first_hash = rimau::http::ordered_reverse_proxy_upstreams(request, upstreams, settings);
+        auto second_hash = rimau::http::ordered_reverse_proxy_upstreams(request, upstreams, settings);
+        assert(first_hash.size() == 3);
+        assert(first_hash[0].port == second_hash[0].port);
+        assert(first_hash[1].port == second_hash[1].port);
+        assert(first_hash[2].port == second_hash[2].port);
+
+        assert(rimau::http::parse_reverse_proxy_load_balancing_policy("round-robin") == rimau::http::ReverseProxyLoadBalancingPolicy::round_robin);
+        assert(rimau::http::parse_reverse_proxy_load_balancing_policy("failover") == rimau::http::ReverseProxyLoadBalancingPolicy::failover);
+        assert(rimau::http::parse_reverse_proxy_load_balancing_policy("stable-hash") == rimau::http::ReverseProxyLoadBalancingPolicy::stable_hash);
+        assert(rimau::http::reverse_proxy_load_balancing_policy_name(settings.load_balancing_policy) == "stable_hash");
     }
 
     std::filesystem::remove_all(default_root);

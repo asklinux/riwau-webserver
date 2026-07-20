@@ -72,6 +72,7 @@ struct ServerConfig {
     int reverse_proxy_read_timeout_seconds = 30;
     std::size_t reverse_proxy_max_response_bytes = 1024 * 1024;
     std::size_t reverse_proxy_retry_count = 1;
+    std::string reverse_proxy_load_balancing_policy = "round_robin";
     bool reverse_proxy_tls_verify_upstream = false;
     bool reverse_proxy_circuit_breaker_enabled = true;
     std::size_t reverse_proxy_circuit_breaker_failure_threshold = 3;

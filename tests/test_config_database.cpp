@@ -148,6 +148,7 @@ int main()
         assert(config.reverse_proxy_read_timeout_seconds == 30);
         assert(config.reverse_proxy_max_response_bytes == 1048576);
         assert(config.reverse_proxy_retry_count == 1);
+        assert(config.reverse_proxy_load_balancing_policy == "round_robin");
         assert(!config.reverse_proxy_tls_verify_upstream);
         assert(config.reverse_proxy_circuit_breaker_enabled);
         assert(config.reverse_proxy_circuit_breaker_failure_threshold == 3);
@@ -224,6 +225,7 @@ int main()
     rimau::core::set_config_value(database_path, "reverse_proxy_read_timeout_seconds", "4");
     rimau::core::set_config_value(database_path, "reverse_proxy_max_response_bytes", "32768");
     rimau::core::set_config_value(database_path, "reverse_proxy_retry_count", "3");
+    rimau::core::set_config_value(database_path, "reverse_proxy_load_balancing_policy", "stable_hash");
     rimau::core::set_config_value(database_path, "reverse_proxy_tls_verify_upstream", "true");
     rimau::core::set_config_value(database_path, "reverse_proxy_circuit_breaker_enabled", "true");
     rimau::core::set_config_value(database_path, "reverse_proxy_circuit_breaker_failure_threshold", "2");
@@ -297,6 +299,7 @@ int main()
         assert(config.reverse_proxy_read_timeout_seconds == 4);
         assert(config.reverse_proxy_max_response_bytes == 32768);
         assert(config.reverse_proxy_retry_count == 3);
+        assert(config.reverse_proxy_load_balancing_policy == "stable_hash");
         assert(config.reverse_proxy_tls_verify_upstream);
         assert(config.reverse_proxy_circuit_breaker_enabled);
         assert(config.reverse_proxy_circuit_breaker_failure_threshold == 2);
@@ -487,6 +490,14 @@ int main()
         invalid_proxy_retry_failed = true;
     }
     assert(invalid_proxy_retry_failed);
+
+    bool invalid_proxy_policy_failed = false;
+    try {
+        rimau::core::set_config_value(database_path, "reverse_proxy_load_balancing_policy", "random");
+    } catch (const std::runtime_error&) {
+        invalid_proxy_policy_failed = true;
+    }
+    assert(invalid_proxy_policy_failed);
 
     bool invalid_proxy_tls_verify_failed = false;
     try {

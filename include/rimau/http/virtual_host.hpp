@@ -22,6 +22,12 @@ enum class VirtualHostAction {
     server_side_script
 };
 
+enum class ReverseProxyLoadBalancingPolicy {
+    round_robin,
+    failover,
+    stable_hash
+};
+
 struct ReverseProxyTarget {
     std::string scheme = "http";
     std::string host;
@@ -39,6 +45,7 @@ struct ReverseProxySettings {
     bool circuit_breaker_enabled = true;
     std::size_t circuit_breaker_failure_threshold = 3;
     int circuit_breaker_cooldown_seconds = 10;
+    ReverseProxyLoadBalancingPolicy load_balancing_policy = ReverseProxyLoadBalancingPolicy::round_robin;
 };
 
 struct VirtualHostRule {
@@ -62,7 +69,15 @@ struct VirtualHostWafOverride {
 std::string normalize_host(std::string_view host_header);
 ReverseProxyTarget parse_reverse_proxy_target(std::string_view value);
 std::vector<ReverseProxyTarget> parse_reverse_proxy_targets(std::string_view value);
+ReverseProxyLoadBalancingPolicy parse_reverse_proxy_load_balancing_policy(std::string_view value);
+std::string_view reverse_proxy_load_balancing_policy_name(ReverseProxyLoadBalancingPolicy policy);
 std::string reverse_proxy_target_path(const ReverseProxyTarget& upstream, std::string_view request_target);
+std::string build_reverse_proxy_upstream_request(const Request& request, const ReverseProxyTarget& upstream);
+Response parse_reverse_proxy_upstream_response(std::string raw_response);
+std::vector<ReverseProxyTarget> ordered_reverse_proxy_upstreams(
+    const Request& request,
+    const std::vector<ReverseProxyTarget>& upstreams,
+    const ReverseProxySettings& settings);
 std::vector<VirtualHostRule> parse_virtual_host_rules(std::string_view value);
 const VirtualHostRule* select_virtual_host_rule(const Request& request, const std::vector<VirtualHostRule>& rules);
 std::vector<VirtualHostWafOverride> parse_virtual_host_waf_overrides(std::string_view value);

@@ -510,8 +510,125 @@ class WebSocketUpstream:
             self.ready.set()
 
 
+class HttpUpstream:
+    def __init__(self, name: str, max_requests: int = 1):
+        self.name = name
+        self.max_requests = max_requests
+        self.port = free_port()
+        self.ready = threading.Event()
+        self.failed = None
+        self.requests = []
+        self.thread = threading.Thread(target=self._run, daemon=True)
+
+    def start(self) -> None:
+        self.thread.start()
+        if not self.ready.wait(timeout=3):
+            raise RuntimeError(f"http upstream {self.name} did not start")
+
+    def join(self) -> None:
+        self.thread.join(timeout=3)
+        if self.thread.is_alive():
+            raise RuntimeError(f"http upstream {self.name} did not finish")
+        if self.failed is not None:
+            raise self.failed
+
+    def _run(self) -> None:
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+                listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                listener.bind(("127.0.0.1", self.port))
+                listener.listen(self.max_requests)
+                self.ready.set()
+                for _ in range(self.max_requests):
+                    conn, _ = listener.accept()
+                    with conn:
+                        conn.settimeout(5)
+                        data = b""
+                        while b"\r\n\r\n" not in data:
+                            chunk = conn.recv(4096)
+                            if not chunk:
+                                break
+                            data += chunk
+                        self.requests.append(data)
+                        body = f"upstream:{self.name}\n".encode("ascii")
+                        response = (
+                            b"HTTP/1.1 200 OK\r\n"
+                            b"Content-Type: text/plain\r\n"
+                            + b"Content-Length: " + str(len(body)).encode("ascii") + b"\r\n"
+                            b"Connection: close\r\n"
+                            b"\r\n"
+                            + body
+                        )
+                        conn.sendall(response)
+        except BaseException as error:
+            self.failed = error
+            self.ready.set()
+
+
+class SlowHttpUpstream:
+    def __init__(self, delay_seconds: float = 1.2):
+        self.delay_seconds = delay_seconds
+        self.port = free_port()
+        self.ready = threading.Event()
+        self.request_received = threading.Event()
+        self.failed = None
+        self.thread = threading.Thread(target=self._run, daemon=True)
+
+    def start(self) -> None:
+        self.thread.start()
+        if not self.ready.wait(timeout=3):
+            raise RuntimeError("slow http upstream did not start")
+
+    def join(self) -> None:
+        self.thread.join(timeout=4)
+        if self.thread.is_alive():
+            raise RuntimeError("slow http upstream did not finish")
+        if self.failed is not None:
+            raise self.failed
+
+    def _run(self) -> None:
+        try:
+            with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as listener:
+                listener.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+                listener.bind(("127.0.0.1", self.port))
+                listener.listen(1)
+                self.ready.set()
+                conn, _ = listener.accept()
+                with conn:
+                    conn.settimeout(5)
+                    data = b""
+                    while b"\r\n\r\n" not in data:
+                        chunk = conn.recv(4096)
+                        if not chunk:
+                            break
+                        data += chunk
+                    self.request_received.set()
+                    time.sleep(self.delay_seconds)
+                    body = b"upstream:slow\n"
+                    response = (
+                        b"HTTP/1.1 200 OK\r\n"
+                        b"Content-Type: text/plain\r\n"
+                        + b"Content-Length: " + str(len(body)).encode("ascii") + b"\r\n"
+                        b"Connection: close\r\n"
+                        b"\r\n"
+                        + body
+                    )
+                    conn.sendall(response)
+        except BaseException as error:
+            self.failed = error
+            self.ready.set()
+            self.request_received.set()
+
+
 class RimauServer:
-    def __init__(self, server_path: Path, runtime_root: Path, upstream_port: int | None = None, extra_updates=None):
+    def __init__(
+        self,
+        server_path: Path,
+        runtime_root: Path,
+        upstream_port: int | None = None,
+        extra_updates=None,
+        env_updates=None,
+    ):
         self.server_path = server_path
         self.root = Path(tempfile.mkdtemp(prefix="rimau-http1-network-", dir=runtime_root))
         self.document_root = self.root / "public"
@@ -522,6 +639,7 @@ class RimauServer:
         self.process = None
         self.upstream_port = upstream_port
         self.extra_updates = list(extra_updates or [])
+        self.env_updates = dict(env_updates or {})
 
     def __enter__(self):
         (self.document_root / "index.html").write_text("Rimau HTTP/1 integration\n", encoding="utf-8")
@@ -555,6 +673,7 @@ class RimauServer:
             [str(self.server_path), "--database", str(self.database)],
             stdout=log_handle,
             stderr=subprocess.STDOUT,
+            env={**os.environ, **self.env_updates},
         )
         log_handle.close()
         wait_for_port(self.port, self.process)
@@ -777,6 +896,109 @@ def test_websocket_proxy(port: int, upstream: WebSocketUpstream) -> None:
     upstream.join()
 
 
+def test_reverse_proxy_failover_policy(server_path: Path, runtime_root: Path) -> None:
+    primary = HttpUpstream("primary", max_requests=2)
+    secondary_port = free_port()
+    primary.start()
+    updates = [
+        "worker_threads=1",
+        "rate_limit_enabled=false",
+        "reverse_proxy_retry_count=1",
+        "reverse_proxy_load_balancing_policy=failover",
+        f"virtual_hosts=proxy.test=proxy:http://127.0.0.1:{primary.port},http://127.0.0.1:{secondary_port}",
+    ]
+    with RimauServer(server_path, runtime_root, extra_updates=updates) as server:
+        for _ in range(2):
+            status, _, _, body = http_request(
+                server.port,
+                b"GET /proxy-policy HTTP/1.1\r\nHost: proxy.test\r\nConnection: close\r\n\r\n",
+            )
+            assert status == 200, (status, body)
+            assert body == b"upstream:primary\n", body
+
+    primary.join()
+    assert len(primary.requests) == 2, primary.requests
+
+
+def test_reverse_proxy_upstream_io_does_not_block_worker(server_path: Path, runtime_root: Path) -> None:
+    upstream = SlowHttpUpstream(delay_seconds=1.2)
+    upstream.start()
+    updates = [
+        "worker_threads=1",
+        "rate_limit_enabled=false",
+        "reverse_proxy_read_timeout_seconds=5",
+        f"virtual_hosts=proxy.test=proxy:http://127.0.0.1:{upstream.port}",
+    ]
+    with RimauServer(server_path, runtime_root, extra_updates=updates) as server:
+        proxy = HttpConnection(server.port)
+        try:
+            proxy.send(b"GET /slow HTTP/1.1\r\nHost: proxy.test\r\nConnection: close\r\n\r\n")
+            assert upstream.request_received.wait(timeout=3), "slow upstream did not receive proxy request"
+
+            started = time.monotonic()
+            status, _, _, body = http_request(
+                server.port,
+                b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+            )
+            elapsed = time.monotonic() - started
+            assert status == 200, (status, body)
+            assert body == b"Rimau custom index\n", body
+            assert elapsed < 0.8, elapsed
+
+            status, _, _, body = proxy.read_response()
+            assert status == 200, (status, body)
+            assert body == b"upstream:slow\n", body
+        finally:
+            proxy.close()
+
+    upstream.join()
+
+
+def test_script_vhost_does_not_shell_out_to_system_runtime(server_path: Path, runtime_root: Path) -> None:
+    fake_root = Path(tempfile.mkdtemp(prefix="rimau-fake-runtime-", dir=runtime_root))
+    fake_bin = fake_root / "bin"
+    fake_bin.mkdir()
+    marker = fake_root / "runtime-invoked.txt"
+    try:
+        for runtime in ("php", "python", "perl"):
+            executable = fake_bin / runtime
+            executable.write_text(
+                "#!/bin/sh\n"
+                f"echo {runtime} >> {marker}\n"
+                "exit 42\n",
+                encoding="utf-8",
+            )
+            executable.chmod(0o755)
+
+        updates = [
+            "worker_threads=1",
+            "rate_limit_enabled=false",
+            (
+                "virtual_hosts="
+                "php.test=script:php:public/app;"
+                "python.test=script:python:public/app;"
+                "perl.test=script:perl:public/app"
+            ),
+        ]
+        env_updates = {
+            "PATH": str(fake_bin) + os.pathsep + os.environ.get("PATH", ""),
+        }
+        with RimauServer(server_path, runtime_root, extra_updates=updates, env_updates=env_updates) as server:
+            for host, runtime in (("php.test", "php"), ("python.test", "python"), ("perl.test", "perl")):
+                status, _, headers, body = http_request(
+                    server.port,
+                    f"GET /index HTTP/1.1\r\nHost: {host}\r\nConnection: close\r\n\r\n".encode("ascii"),
+                )
+                assert status == 501, (host, status, headers, body)
+                assert headers.get("x-rimau-runtime-status") == "planned", (host, headers)
+                assert f'"runtime":"{runtime}"'.encode("ascii") in body, (host, body)
+                assert b'"implemented":false' in body, (host, body)
+
+        assert not marker.exists(), marker.read_text(encoding="utf-8") if marker.exists() else marker
+    finally:
+        shutil.rmtree(fake_root, ignore_errors=True)
+
+
 def test_rate_limit(server_path: Path, runtime_root: Path) -> None:
     updates = [
         "worker_threads=1",
@@ -997,6 +1219,9 @@ def main() -> int:
     test_connection_limits(server_path, runtime_root)
     test_timeout_and_slow_client_behavior(server_path, runtime_root)
     test_request_timeout(server_path, runtime_root)
+    test_reverse_proxy_failover_policy(server_path, runtime_root)
+    test_reverse_proxy_upstream_io_does_not_block_worker(server_path, runtime_root)
+    test_script_vhost_does_not_shell_out_to_system_runtime(server_path, runtime_root)
     test_waf_entry_points(server_path, runtime_root)
     test_virtual_host_waf_overrides(server_path, runtime_root)
 

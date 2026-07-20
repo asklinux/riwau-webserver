@@ -2,6 +2,7 @@
 
 #include <cstddef>
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <optional>
 #include <string>
@@ -23,6 +24,23 @@ struct RequestBodyFile {
     std::filesystem::path path;
 };
 
+struct Request;
+
+class RequestBodyReader {
+public:
+    explicit RequestBodyReader(const Request& request);
+
+    std::string read_chunk(std::size_t max_bytes);
+    bool eof() const noexcept;
+    std::size_t bytes_read() const noexcept;
+
+private:
+    const Request& request_;
+    std::ifstream file_;
+    std::size_t offset_ = 0;
+    bool exhausted_ = false;
+};
+
 struct Request {
     std::string method;
     std::string target;
@@ -42,6 +60,7 @@ struct Request {
     std::size_t body_size() const noexcept;
     bool body_spooled_to_file() const noexcept;
     std::string body_text(std::size_t max_bytes = 0) const;
+    RequestBodyReader open_body_reader() const;
 };
 
 } // namespace rimau::http

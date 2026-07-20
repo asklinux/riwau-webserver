@@ -175,6 +175,8 @@ Supported keys:
 - `host`
 - `port`
 - `document_root`
+- `directory_index`
+- `error_page`
 - `max_request_bytes`
 - `http_keep_alive_enabled`
 - `http_keep_alive_timeout_seconds`
@@ -353,6 +355,8 @@ Supported keys:
 - `host`
 - `port`
 - `document_root`
+- `directory_index`
+- `error_page`
 - `max_request_bytes`
 - `http_keep_alive_enabled`
 - `http_keep_alive_timeout_seconds`
@@ -491,7 +495,7 @@ The default `tls_certificate_file` and `tls_private_key_file` remain the fallbac
 host=static:document-root;host=proxy:http://upstream:port/base,https://backup:port/base;host=script:runtime:script-root
 ```
 
-SIGHUP reloads SQLite config values that can safely change without recreating listener sockets or worker threads. Dynamic values include `document_root`, `max_request_bytes`, HTTP keep-alive settings, TCP keepalive settings for newly accepted sockets, protocol status flags, graceful shutdown timeout, request/header/body/idle timeout, rate-limit settings, IPv4/IPv6 IP allow/block lists, security header behavior/values, virtual host and reverse proxy settings, WAF settings, and TLS certificate/key/SNI/TLS settings for new TLS connections. Changes to bind address, port, listener backlog, worker count, epoll batch size, `SO_REUSEPORT`, connection pool sizing, HTTP/1 enablement, or `tls_enabled` require restart.
+SIGHUP reloads SQLite config values that can safely change without recreating listener sockets or worker threads. Dynamic values include `document_root`, `directory_index`, `error_page`, `max_request_bytes`, HTTP keep-alive settings, TCP keepalive settings for newly accepted sockets, protocol status flags, graceful shutdown timeout, request/header/body/idle timeout, rate-limit settings, IPv4/IPv6 IP allow/block lists, security header behavior/values, virtual host and reverse proxy settings, WAF settings, and TLS certificate/key/SNI/TLS settings for new TLS connections. Changes to bind address, port, listener backlog, worker count, epoll batch size, `SO_REUSEPORT`, connection pool sizing, HTTP/1 enablement, or `tls_enabled` require restart.
 
 Production config ownership, backup, and migration behavior are not final. Needs verification.
 
@@ -534,7 +538,7 @@ Linux epoll reactor worker
   -> built-in WAF inspection when enabled
   -> create Transaction
   -> VirtualHostHandlerFactory selects static, reverse proxy, script-placeholder, or fallback static handler
-  -> handler sends normal Response or chunked Response through buffered ResponseSink
+  -> handler can read request body chunks through RequestBodyReader and sends normal Response or chunked Response through buffered ResponseSink
   -> non-blocking response write
 ```
 
@@ -561,10 +565,11 @@ Current:
 - POST, PUT, PATCH, DELETE, and OPTIONS scaffold behavior.
 - Content-Length request body parsing.
 - Chunked transfer decoding for request bodies.
-- File-backed request body accumulation for large Content-Length or chunked bodies; `Request::body_size()` reports total body size, `Request::body_spooled_to_file()` reports whether a temporary spool file is used, and `Request::body_text(max_bytes)` reads bounded text for WAF/scaffold handlers.
+- File-backed request body accumulation for large Content-Length or chunked bodies; `Request::body_size()` reports total body size, `Request::body_spooled_to_file()` reports whether a temporary spool file is used, `Request::body_text(max_bytes)` reads bounded text, and `Request::open_body_reader()` returns a pull reader for chunked handler reads.
 - URL decoding and query parameter parsing.
 - JSON request detection and JSON response generation for method scaffold responses.
-- Single-range static file responses with `206 Partial Content` and `Content-Range`.
+- Single-range and multipart static file responses with `206 Partial Content`, per-part `Content-Range`, strong ETag/Last-Modified validators, and `If-Range` handling.
+- SQLite-configurable `directory_index` and optional custom `error_page` for static file responses.
 - MIME type detection for common text, image, video, wasm, and pdf extensions.
 - Gzip static response compression through bundled static zlib 1.3.2 when requested by the client.
 - Basic chunked response API through `ResponseSink::send_chunked`, `ResponseBuilder::send_chunked`, and `Response::to_http_chunked_string`; HTTP/1.1 serialization emits `Transfer-Encoding: chunked` and omits `Content-Length`.
@@ -610,9 +615,8 @@ Current:
 
 Missing:
 
-- Handler-level streaming request body API and full backpressure contract. Current code accumulates large HTTP/1.1 bodies into temporary files before dispatch, but handlers still receive the request only after the body is complete.
+- Live in-flight request body streaming before handler dispatch and full network backpressure contract. Current code accumulates large HTTP/1.1 bodies into temporary files before dispatch, then exposes a pull-style `RequestBodyReader` to handlers.
 - Producer-side async response streaming/backpressure. Current basic chunked responses are chunk-encoded before socket write rather than produced incrementally by the event loop.
-- Multipart byte ranges.
 - Brotli compression.
 - Full WebSocket fragmentation/extensions/subprotocol support.
 - Full request pipelining stress validation.

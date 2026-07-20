@@ -112,6 +112,54 @@ RequestBodyFile::~RequestBodyFile()
     std::filesystem::remove(path, ignored);
 }
 
+RequestBodyReader::RequestBodyReader(const Request& request)
+    : request_(request)
+{
+    if (request_.body_file) {
+        file_.open(request_.body_file->path, std::ios::binary);
+    }
+}
+
+std::string RequestBodyReader::read_chunk(std::size_t max_bytes)
+{
+    if (max_bytes == 0 || eof()) {
+        return {};
+    }
+
+    if (!request_.body_file) {
+        const auto remaining = request_.body.size() - offset_;
+        const auto bytes_to_read = std::min(max_bytes, remaining);
+        auto chunk = request_.body.substr(offset_, bytes_to_read);
+        offset_ += chunk.size();
+        exhausted_ = offset_ >= request_.body.size();
+        return chunk;
+    }
+
+    std::string chunk;
+    chunk.resize(max_bytes);
+    file_.read(chunk.data(), static_cast<std::streamsize>(chunk.size()));
+    chunk.resize(static_cast<std::size_t>(file_.gcount()));
+    offset_ += chunk.size();
+    exhausted_ = chunk.empty() || offset_ >= request_.body_size();
+    return chunk;
+}
+
+bool RequestBodyReader::eof() const noexcept
+{
+    if (exhausted_) {
+        return true;
+    }
+    if (!request_.body_file) {
+        return offset_ >= request_.body.size();
+    }
+    return !file_.is_open() || offset_ >= request_.body_size();
+}
+
+std::size_t RequestBodyReader::bytes_read() const noexcept
+{
+    return offset_;
+}
+
 std::optional<std::string> Request::header(std::string_view name) const
 {
     std::string key(name);
@@ -162,24 +210,25 @@ bool Request::body_spooled_to_file() const noexcept
 
 std::string Request::body_text(std::size_t max_bytes) const
 {
-    if (!body_file) {
-        if (max_bytes > 0 && body.size() > max_bytes) {
-            return body.substr(0, max_bytes);
-        }
-        return body;
-    }
-
-    std::ifstream input(body_file->path, std::ios::binary);
-    if (!input) {
-        return {};
-    }
-
     const auto bytes_to_read = max_bytes == 0 ? body_size() : std::min(max_bytes, body_size());
     std::string output;
-    output.resize(bytes_to_read);
-    input.read(output.data(), static_cast<std::streamsize>(output.size()));
-    output.resize(static_cast<std::size_t>(input.gcount()));
+    output.reserve(bytes_to_read);
+
+    auto reader = open_body_reader();
+    while (output.size() < bytes_to_read && !reader.eof()) {
+        auto chunk = reader.read_chunk(std::min<std::size_t>(8192, bytes_to_read - output.size()));
+        if (chunk.empty()) {
+            break;
+        }
+        output += std::move(chunk);
+    }
+
     return output;
+}
+
+RequestBodyReader Request::open_body_reader() const
+{
+    return RequestBodyReader(*this);
 }
 
 ParseResult parse_request(std::string_view raw_request)

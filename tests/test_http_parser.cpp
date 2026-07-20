@@ -1,7 +1,10 @@
 #include "rimau/http/parser.hpp"
 
 #include <cassert>
+#include <filesystem>
+#include <fstream>
 #include <iostream>
+#include <memory>
 
 int main()
 {
@@ -38,6 +41,33 @@ int main()
         assert(parsed.request->query_params.at("tag").size() == 2);
         assert(parsed.request->body == "{\"ok\":true}\n");
         assert(parsed.request->is_json());
+
+        auto reader = parsed.request->open_body_reader();
+        assert(reader.read_chunk(4) == "{\"ok");
+        assert(reader.read_chunk(64) == "\":true}\n");
+        assert(reader.eof());
+    }
+
+    {
+        const auto path = std::filesystem::temp_directory_path() / "rimau-parser-body-reader.tmp";
+        {
+            std::ofstream output(path, std::ios::binary);
+            output << "abcdefghijklmnopqrstuvwxyz";
+        }
+
+        rimau::http::Request request;
+        request.method = "POST";
+        request.target = "/upload";
+        request.version = "HTTP/1.1";
+        request.body_size_bytes = 26;
+        request.body_file = std::make_shared<rimau::http::RequestBodyFile>(path);
+
+        auto reader = request.open_body_reader();
+        assert(reader.read_chunk(5) == "abcde");
+        assert(reader.bytes_read() == 5);
+        assert(reader.read_chunk(7) == "fghijkl");
+        assert(reader.read_chunk(64) == "mnopqrstuvwxyz");
+        assert(reader.eof());
     }
 
     {

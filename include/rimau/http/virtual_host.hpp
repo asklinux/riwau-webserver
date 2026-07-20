@@ -2,6 +2,7 @@
 
 #include "rimau/http/request.hpp"
 #include "rimau/http/request_handler_factory.hpp"
+#include "rimau/http/response.hpp"
 
 #include <cstddef>
 #include <cstdint>
@@ -62,7 +63,8 @@ public:
     VirtualHostHandlerFactory(
         std::filesystem::path default_document_root,
         std::string virtual_hosts_config,
-        ReverseProxySettings proxy_settings);
+        ReverseProxySettings proxy_settings,
+        StaticFileOptions static_file_options = {});
 
     std::unique_ptr<RequestHandler> create(const Request& request) const override;
 
@@ -70,6 +72,7 @@ private:
     std::filesystem::path default_document_root_;
     std::vector<VirtualHostRule> rules_;
     ReverseProxySettings proxy_settings_;
+    StaticFileOptions static_file_options_;
 };
 
 } // namespace rimau::http

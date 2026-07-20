@@ -142,7 +142,7 @@ bool is_optional_string_key(const std::string& key)
         || key == "security_header_content_security_policy" || key == "security_header_strict_transport_security"
         || key == "security_header_x_content_type_options" || key == "security_header_x_frame_options"
         || key == "security_header_referrer_policy" || key == "security_header_cross_origin_opener_policy"
-        || key == "virtual_hosts";
+        || key == "virtual_hosts" || key == "error_page";
 }
 
 bool contains_control_character(const std::string& value)
@@ -150,6 +150,18 @@ bool contains_control_character(const std::string& value)
     return std::any_of(value.begin(), value.end(), [](unsigned char ch) {
         return ch < 0x20 || ch == 0x7f;
     });
+}
+
+bool valid_directory_index(std::string_view value)
+{
+    return !value.empty()
+        && value != "."
+        && value != ".."
+        && value.find('/') == std::string_view::npos
+        && value.find('\\') == std::string_view::npos
+        && std::none_of(value.begin(), value.end(), [](unsigned char ch) {
+               return ch < 0x20 || ch == 0x7f;
+           });
 }
 
 bool valid_tls_version(const std::string& value)
@@ -302,6 +314,8 @@ const std::vector<ConfigDefault>& config_defaults()
         { "host", "0.0.0.0", "IPv4 address to bind" },
         { "port", "8080", "TCP port to listen on" },
         { "document_root", "public", "Static file document root" },
+        { "directory_index", "index.html", "Static directory index file name" },
+        { "error_page", "", "Optional custom error page path, relative to document_root unless absolute" },
         { "max_request_bytes", "65536", "Maximum request header bytes" },
         { "http_keep_alive_enabled", "true", "Enable HTTP/1.1 persistent connections" },
         { "http_keep_alive_timeout_seconds", "15", "HTTP/1.1 keep-alive idle timeout" },
@@ -667,7 +681,7 @@ void validate_config_value(const std::string& key, const std::string& value)
         if (!valid_tls_version(value)) {
             throw std::runtime_error(key + " must be TLSv1.2 or TLSv1.3");
         }
-    } else if (key == "server_name" || key == "tls_cipher_list" || key == "tls_ciphersuites" || key == "tls_alpn_protocols"
+    } else if (key == "server_name" || key == "directory_index" || key == "error_page" || key == "tls_cipher_list" || key == "tls_ciphersuites" || key == "tls_alpn_protocols"
         || key == "tls_sni_hosts" || key == "tls_sni_certificates" || key == "ip_allowlist" || key == "ip_blocklist"
         || key == "security_header_content_security_policy" || key == "security_header_strict_transport_security"
         || key == "security_header_x_content_type_options" || key == "security_header_x_frame_options"
@@ -675,6 +689,9 @@ void validate_config_value(const std::string& key, const std::string& value)
         || key == "virtual_hosts") {
         if (contains_control_character(value)) {
             throw std::runtime_error(key + " cannot contain control characters");
+        }
+        if (key == "directory_index" && !valid_directory_index(value)) {
+            throw std::runtime_error("directory_index must be a file name without slashes");
         }
         if ((key == "ip_allowlist" || key == "ip_blocklist") && !valid_ip_list(value)) {
             throw std::runtime_error(key + " must contain IPv4/IPv6 exact addresses or CIDR ranges");
@@ -696,6 +713,8 @@ ServerConfig build_config(const std::map<std::string, std::string>& values)
     config.host = value_or_default(values, "host");
     config.port = parse_port(value_or_default(values, "port"));
     config.document_root = value_or_default(values, "document_root");
+    config.directory_index = value_or_default(values, "directory_index");
+    config.error_page = value_or_default(values, "error_page");
     config.max_request_bytes = parse_size(value_or_default(values, "max_request_bytes"), "max_request_bytes");
     config.http_keep_alive_enabled = parse_bool(value_or_default(values, "http_keep_alive_enabled"), "http_keep_alive_enabled");
     config.http_keep_alive_timeout_seconds = parse_positive_int(value_or_default(values, "http_keep_alive_timeout_seconds"), "http_keep_alive_timeout_seconds");
@@ -779,6 +798,8 @@ ServerConfig build_config(const std::map<std::string, std::string>& values)
         }
     };
     ensure_no_control("tls_cipher_list", config.tls_cipher_list);
+    ensure_no_control("directory_index", config.directory_index);
+    ensure_no_control("error_page", config.error_page.string());
     ensure_no_control("tls_ciphersuites", config.tls_ciphersuites);
     ensure_no_control("tls_alpn_protocols", config.tls_alpn_protocols);
     ensure_no_control("tls_sni_hosts", config.tls_sni_hosts);
@@ -794,6 +815,9 @@ ServerConfig build_config(const std::map<std::string, std::string>& values)
     ensure_no_control("virtual_hosts", config.virtual_hosts);
     if (!valid_tls_version(config.tls_min_version)) {
         throw std::runtime_error("tls_min_version must be TLSv1.2 or TLSv1.3");
+    }
+    if (!valid_directory_index(config.directory_index)) {
+        throw std::runtime_error("directory_index must be a file name without slashes");
     }
     if (!valid_tls_version(config.tls_max_version)) {
         throw std::runtime_error("tls_max_version must be TLSv1.2 or TLSv1.3");
@@ -905,6 +929,8 @@ std::string describe_config(const ServerConfig& config)
     output << "host=" << config.host
            << ", port=" << config.port
            << ", document_root=" << config.document_root.string()
+           << ", directory_index=" << config.directory_index
+           << ", error_page=" << config.error_page.string()
            << ", max_request_bytes=" << config.max_request_bytes
            << ", http_keep_alive_enabled=" << (config.http_keep_alive_enabled ? "true" : "false")
            << ", http_keep_alive_timeout_seconds=" << config.http_keep_alive_timeout_seconds

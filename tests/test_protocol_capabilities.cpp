@@ -33,6 +33,9 @@ int main()
     assert(http1.enabled);
     assert(http1.transport == "TCP");
     assert(http1.notes.find("chunked decode") != std::string::npos);
+    assert(http1.notes.find("handler pull reads") != std::string::npos);
+    assert(http1.notes.find("single/multipart range with If-Range") != std::string::npos);
+    assert(http1.notes.find("directory index and error page") != std::string::npos);
     assert(http1.notes.find("WebSocket") != std::string::npos);
     assert(http1.notes.find("reverse proxy tunneling") != std::string::npos);
     assert(http1.notes.find("security controls") != std::string::npos);

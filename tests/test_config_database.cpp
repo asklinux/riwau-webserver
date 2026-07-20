@@ -94,6 +94,8 @@ int main()
         assert(config.host == "0.0.0.0");
         assert(config.port == 8080);
         assert(config.document_root == "public");
+        assert(config.directory_index == "index.html");
+        assert(config.error_page.empty());
         assert(config.max_request_bytes == 65536);
         assert(config.http_keep_alive_enabled);
         assert(config.http_keep_alive_timeout_seconds == 15);
@@ -164,6 +166,8 @@ int main()
     rimau::core::set_config_value(database_path, "host", "127.0.0.1");
     rimau::core::set_config_value(database_path, "port", "18080");
     rimau::core::set_config_value(database_path, "document_root", "public");
+    rimau::core::set_config_value(database_path, "directory_index", "home.html");
+    rimau::core::set_config_value(database_path, "error_page", "errors/default.html");
     rimau::core::set_config_value(database_path, "max_request_bytes", "131072");
     rimau::core::set_config_value(database_path, "http_keep_alive_enabled", "true");
     rimau::core::set_config_value(database_path, "http_keep_alive_timeout_seconds", "7");
@@ -234,6 +238,8 @@ int main()
         assert(config.host == "127.0.0.1");
         assert(config.port == 18080);
         assert(config.document_root == "public");
+        assert(config.directory_index == "home.html");
+        assert(config.error_page == "errors/default.html");
         assert(config.max_request_bytes == 131072);
         assert(config.http_keep_alive_enabled);
         assert(config.http_keep_alive_timeout_seconds == 7);
@@ -380,6 +386,14 @@ int main()
         invalid_http_keepalive_max_failed = true;
     }
     assert(invalid_http_keepalive_max_failed);
+
+    bool invalid_directory_index_failed = false;
+    try {
+        rimau::core::set_config_value(database_path, "directory_index", "../index.html");
+    } catch (const std::runtime_error&) {
+        invalid_directory_index_failed = true;
+    }
+    assert(invalid_directory_index_failed);
 
     rimau::core::set_config_value(database_path, "tls_alpn_protocols", "h2,http/1.1");
     {

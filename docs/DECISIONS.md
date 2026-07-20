@@ -321,7 +321,7 @@ HTTP/2 and HTTP/3 need a stronger HTTP/1.1 foundation: body framing, keep-alive,
 
 Consequence:
 
-This is still not a production-complete HTTP server. Request bodies are buffered in memory, chunked trailers are not exposed to handlers, JSON is not parsed into a structured DOM, multipart ranges are not implemented, compression is gzip only through zlib, WebSocket support is a basic echo endpoint without fragmentation/extensions/subprotocol routing, and static file reads remain synchronous.
+This is still not a production-complete HTTP server. Later work added file-backed request-body spooling, a pull-style body reader, and multipart ranges, but chunked trailers are not exposed to handlers, JSON is not parsed into a structured DOM, compression is gzip only through zlib, WebSocket support is a basic echo endpoint without fragmentation/extensions/subprotocol routing, and static file reads remain synchronous.
 
 ## ADR-0015: Add TLS And HTTP Security Hardening Controls
 
@@ -773,7 +773,7 @@ Rimau needs to stop requiring large uploads to live entirely in `Request::body` 
 
 Consequence:
 
-This does not complete streaming request body support. Handler dispatch still waits for the full request body. Normal HTTP reverse proxy forwarding still reads the spooled body into memory before sending upstream. A future design must add handler-visible body streams, reverse proxy request/response streaming, producer-side async response backpressure, and explicit backpressure semantics.
+This does not complete live in-flight request body streaming. Handler dispatch still waits for the full request body, although later P1 work adds a pull-style `RequestBodyReader` over memory or spool files. Normal HTTP reverse proxy forwarding still reads the spooled body into memory before sending upstream. A future design must add live request dispatch before the full body is received, reverse proxy request/response streaming, producer-side async response backpressure, and explicit network-level backpressure semantics.
 
 ## ADR-0030: Add Basic HTTP/1.1 Chunked Response API
 
@@ -799,3 +799,72 @@ P1 requires handlers to be able to send a response without a known `Content-Leng
 Consequence:
 
 This is not a full asynchronous response producer model. The current implementation still serializes chunked output into the connection response buffer before socket write. Producer-side async chunk generation, response backpressure, and reverse proxy response streaming remain pending.
+
+## ADR-0031: Add Pull-Style HTTP/1.1 Request Body Reader
+
+- Date: 2026-07-20
+- Status: Accepted
+
+Decision:
+
+Expose `Request::open_body_reader()` and `RequestBodyReader::read_chunk(max_bytes)` so handlers can consume request bodies in bounded chunks from either in-memory body storage or file-backed spool storage.
+
+Implementation:
+
+- Add `RequestBodyReader` in `include/rimau/http/request.hpp`.
+- Implement chunk reads for in-memory `Request::body` and `RequestBodyFile` spool files.
+- Rework `Request::body_text(max_bytes)` to use the reader internally.
+- Update the scaffold JSON method handler to read request body previews through the reader.
+- Add parser unit coverage for memory and file-backed reader behavior.
+
+Reason:
+
+P1 needs a handler-facing body API that does not require loading large uploads into one string. The existing file-backed spool already keeps large HTTP/1.1 bodies out of memory; a pull reader makes that capability usable by handlers without redesigning the transaction dispatch model.
+
+Consequence:
+
+This is not live request streaming before handler dispatch. The current HTTP/1.1 connection still receives and frames the full body before creating a `Transaction`. Reverse proxy request streaming and explicit socket-level backpressure are still future work.
+
+## ADR-0032: Add Static File Multipart Range, If-Range, Directory Index, And Error Page Options
+
+- Date: 2026-07-20
+- Status: Accepted
+
+Decision:
+
+Extend static file serving with multipart byte ranges, `If-Range`, SQLite-configurable directory index, and an optional custom static error page.
+
+Implementation:
+
+- Add `StaticFileOptions` with `directory_index` and `error_page`.
+- Keep the existing `file_response(request, root)` overload and add `file_response(request, root, options)`.
+- Generate ETag and Last-Modified validators for static files.
+- Honor `Range` when `If-Range` is absent or matches the generated strong ETag/Last-Modified value.
+- Serialize multipart range bodies as `multipart/byteranges` with per-part `Content-Range`.
+- Add SQLite keys `directory_index` and `error_page`, validate `directory_index` as a safe file name, and wire options through static and virtual-host handlers.
+- Add unit and HTTP/1.1 network integration coverage.
+
+Reason:
+
+Static file serving must handle larger media files and operator-controlled index/error behavior without hard-coded filenames. Keeping the options small and SQLite-backed matches the existing config design.
+
+Consequence:
+
+Static file reads are still synchronous inside the handler and still buffer the selected response body before socket write. Zero-copy static file serving, sendfile-style range transmission, and full async file I/O remain future work.
+
+## ADR-0033: Defer Brotli In P1
+
+- Date: 2026-07-20
+- Status: Accepted
+
+Decision:
+
+Do not implement Brotli compression in P1.
+
+Reason:
+
+Rimau currently accepts only bundled dependencies that are explicitly pinned, built, tested, and documented. No Brotli dependency/version/license/update process has been accepted yet, and gzip through bundled zlib already covers the current compression baseline.
+
+Consequence:
+
+HTTP/1.1 compression remains gzip-only. Brotli can be revisited later with a new ADR that pins the source dependency, build flags, deployment behavior, tests, and update process.

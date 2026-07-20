@@ -2,6 +2,8 @@
 
 #include <algorithm>
 #include <cctype>
+#include <chrono>
+#include <ctime>
 #include <cstdlib>
 #include <fstream>
 #include <iomanip>
@@ -188,6 +190,17 @@ bool starts_with_path(const std::filesystem::path& child, const std::filesystem:
     return true;
 }
 
+std::string trim(std::string value)
+{
+    auto not_space = [](unsigned char ch) {
+        return !std::isspace(ch);
+    };
+
+    value.erase(value.begin(), std::find_if(value.begin(), value.end(), not_space));
+    value.erase(std::find_if(value.rbegin(), value.rend(), not_space).base(), value.end());
+    return value;
+}
+
 std::string percent_decode_path(std::string value)
 {
     std::string decoded;
@@ -223,11 +236,15 @@ std::string strip_query(std::string target)
     return target;
 }
 
-struct RangeSelection {
-    bool requested = false;
-    bool satisfiable = false;
+struct ByteRange {
     std::uintmax_t start = 0;
     std::uintmax_t end = 0;
+};
+
+struct RangeSelection {
+    bool requested = false;
+    bool malformed = false;
+    std::vector<ByteRange> ranges;
 };
 
 bool parse_uint(std::string_view value, std::uintmax_t& output)
@@ -252,26 +269,14 @@ bool parse_uint(std::string_view value, std::uintmax_t& output)
     return true;
 }
 
-RangeSelection parse_range(const Request& request, std::uintmax_t file_size)
+bool parse_range_spec(std::string_view spec, std::uintmax_t file_size, ByteRange& output)
 {
-    RangeSelection selection;
-    const auto range = request.header("range");
-    if (!range) {
-        return selection;
-    }
-
-    selection.requested = true;
-    if (!range->starts_with("bytes=") || range->find(',') != std::string::npos || file_size == 0) {
-        return selection;
-    }
-
-    const std::string_view spec(*range);
-    const auto dash = spec.find('-', 6);
+    const auto dash = spec.find('-');
     if (dash == std::string_view::npos) {
-        return selection;
+        return false;
     }
 
-    const auto first = spec.substr(6, dash - 6);
+    const auto first = spec.substr(0, dash);
     const auto last = spec.substr(dash + 1);
 
     std::uintmax_t start = 0;
@@ -279,7 +284,7 @@ RangeSelection parse_range(const Request& request, std::uintmax_t file_size)
     if (first.empty()) {
         std::uintmax_t suffix_length = 0;
         if (!parse_uint(last, suffix_length) || suffix_length == 0) {
-            return selection;
+            return false;
         }
         if (suffix_length >= file_size) {
             start = 0;
@@ -289,25 +294,70 @@ RangeSelection parse_range(const Request& request, std::uintmax_t file_size)
         end = file_size - 1;
     } else {
         if (!parse_uint(first, start)) {
-            return selection;
+            return false;
         }
         if (last.empty()) {
             end = file_size - 1;
         } else if (!parse_uint(last, end)) {
-            return selection;
+            return false;
         }
     }
 
     if (start >= file_size || end < start) {
-        return selection;
+        output.start = 1;
+        output.end = 0;
+        return true;
     }
     if (end >= file_size) {
         end = file_size - 1;
     }
 
-    selection.satisfiable = true;
-    selection.start = start;
-    selection.end = end;
+    output.start = start;
+    output.end = end;
+    return true;
+}
+
+RangeSelection parse_range(const Request& request, std::uintmax_t file_size)
+{
+    RangeSelection selection;
+    const auto range = request.header("range");
+    if (!range) {
+        return selection;
+    }
+
+    selection.requested = true;
+    const auto equals = range->find('=');
+    if (equals == std::string::npos || lowercase(trim(range->substr(0, equals))) != "bytes" || file_size == 0) {
+        selection.malformed = true;
+        return selection;
+    }
+
+    constexpr std::size_t max_ranges = 16;
+    std::size_t cursor = equals + 1;
+    while (cursor <= range->size()) {
+        const auto comma = range->find(',', cursor);
+        const auto end = comma == std::string::npos ? range->size() : comma;
+        const auto item = trim(range->substr(cursor, end - cursor));
+        if (item.empty() || selection.ranges.size() >= max_ranges) {
+            selection.malformed = true;
+            return selection;
+        }
+
+        ByteRange parsed;
+        if (!parse_range_spec(item, file_size, parsed)) {
+            selection.malformed = true;
+            return selection;
+        }
+        if (parsed.end >= parsed.start) {
+            selection.ranges.push_back(parsed);
+        }
+
+        if (comma == std::string::npos) {
+            break;
+        }
+        cursor = comma + 1;
+    }
+
     return selection;
 }
 
@@ -324,6 +374,115 @@ std::string read_file_range(const std::filesystem::path& path, std::uintmax_t st
     file.read(body.data(), static_cast<std::streamsize>(body.size()));
     body.resize(static_cast<std::size_t>(file.gcount()));
     return body;
+}
+
+std::string http_date(std::filesystem::file_time_type file_time)
+{
+    const auto system_time = std::chrono::time_point_cast<std::chrono::system_clock::duration>(
+        file_time - std::filesystem::file_time_type::clock::now() + std::chrono::system_clock::now());
+    const std::time_t timestamp = std::chrono::system_clock::to_time_t(system_time);
+    std::tm utc {};
+    gmtime_r(&timestamp, &utc);
+
+    std::ostringstream output;
+    output << std::put_time(&utc, "%a, %d %b %Y %H:%M:%S GMT");
+    return output.str();
+}
+
+std::string entity_tag(std::uintmax_t file_size, std::filesystem::file_time_type file_time)
+{
+    std::ostringstream output;
+    output << '"'
+           << std::hex << std::nouppercase << file_size
+           << '-'
+           << file_time.time_since_epoch().count()
+           << '"';
+    return output.str();
+}
+
+bool if_range_allows_range(const Request& request, std::string_view etag, std::string_view last_modified)
+{
+    const auto if_range = request.header("if-range");
+    if (!if_range) {
+        return true;
+    }
+
+    const auto value = trim(*if_range);
+    if (value.empty() || value.starts_with("W/")) {
+        return false;
+    }
+    if (value.front() == '"') {
+        return value == etag;
+    }
+    return value == last_modified;
+}
+
+std::string multipart_boundary(std::uintmax_t file_size, std::filesystem::file_time_type file_time)
+{
+    std::ostringstream output;
+    output << "rimau-" << std::hex << std::nouppercase << file_size << '-' << file_time.time_since_epoch().count();
+    return output.str();
+}
+
+std::string multipart_range_body(
+    const std::filesystem::path& path,
+    const std::vector<ByteRange>& ranges,
+    std::uintmax_t file_size,
+    std::string_view content_type,
+    std::string_view boundary)
+{
+    std::ostringstream output;
+    for (const auto& range : ranges) {
+        output << "--" << boundary << "\r\n"
+               << "Content-Type: " << content_type << "\r\n"
+               << "Content-Range: bytes " << range.start << '-' << range.end << '/' << file_size << "\r\n"
+               << "\r\n";
+        output << read_file_range(path, range.start, range.end - range.start + 1);
+        output << "\r\n";
+    }
+    output << "--" << boundary << "--\r\n";
+    return output.str();
+}
+
+bool valid_directory_index(std::string_view value)
+{
+    return !value.empty()
+        && value != "."
+        && value != ".."
+        && value.find('/') == std::string_view::npos
+        && value.find('\\') == std::string_view::npos
+        && std::none_of(value.begin(), value.end(), [](unsigned char ch) {
+               return ch < 0x20 || ch == 0x7f;
+           });
+}
+
+Response apply_custom_error_page(Response response, const std::filesystem::path& root, const StaticFileOptions& options)
+{
+    if (response.status < 400 || options.error_page.empty()) {
+        return response;
+    }
+
+    std::error_code error;
+    const auto raw_page = options.error_page.is_absolute() ? options.error_page : root / options.error_page;
+    auto page = std::filesystem::weakly_canonical(raw_page, error);
+    if (error) {
+        page = raw_page.lexically_normal();
+    }
+    if (!starts_with_path(page, root) || !std::filesystem::is_regular_file(page, error)) {
+        return response;
+    }
+
+    const auto page_size = std::filesystem::file_size(page, error);
+    if (error) {
+        return response;
+    }
+
+    response.headers["content-type"] = mime_type(page);
+    response.headers.erase("content-encoding");
+    response.headers.erase("content-range");
+    response.headers.erase("vary");
+    response.body = read_file_range(page, 0, page_size);
+    return response;
 }
 
 } // namespace
@@ -514,6 +673,11 @@ std::string json_escape(std::string_view value)
 
 Response file_response(const Request& request, const std::filesystem::path& document_root)
 {
+    return file_response(request, document_root, StaticFileOptions {});
+}
+
+Response file_response(const Request& request, const std::filesystem::path& document_root, const StaticFileOptions& options)
+{
     if (request.method != "GET" && request.method != "HEAD") {
         auto response = text_response(405, "Method Not Allowed\n");
         response.headers["allow"] = "GET, HEAD";
@@ -534,10 +698,13 @@ Response file_response(const Request& request, const std::filesystem::path& docu
     if (error) {
         return text_response(500, "Document root is not available\n");
     }
+    if (!valid_directory_index(options.directory_index)) {
+        return apply_custom_error_page(text_response(500, "Directory index config is invalid\n"), root, options);
+    }
 
     auto relative = std::filesystem::path(target.substr(1)).lexically_normal();
     if (relative.empty() || relative == ".") {
-        relative = "index.html";
+        relative = options.directory_index;
     }
 
     auto candidate = std::filesystem::weakly_canonical(root / relative, error);
@@ -550,7 +717,7 @@ Response file_response(const Request& request, const std::filesystem::path& docu
     }
 
     if (std::filesystem::is_directory(candidate, error)) {
-        candidate /= "index.html";
+        candidate /= options.directory_index;
         candidate = std::filesystem::weakly_canonical(candidate, error);
         if (error) {
             candidate = candidate.lexically_normal();
@@ -561,25 +728,36 @@ Response file_response(const Request& request, const std::filesystem::path& docu
     }
 
     if (!std::filesystem::exists(candidate, error)) {
-        return text_response(404, "Not Found\n");
+        return apply_custom_error_page(text_response(404, "Not Found\n"), root, options);
     }
 
     if (!std::filesystem::is_regular_file(candidate, error)) {
-        return text_response(403, "Forbidden\n");
+        return apply_custom_error_page(text_response(403, "Forbidden\n"), root, options);
     }
 
     const auto file_size = std::filesystem::file_size(candidate, error);
     if (error) {
-        return text_response(403, "Forbidden\n");
+        return apply_custom_error_page(text_response(403, "Forbidden\n"), root, options);
     }
+
+    const auto modified_time = std::filesystem::last_write_time(candidate, error);
+    const auto last_modified = error ? std::string {} : http_date(modified_time);
+    const auto etag = error ? std::string {} : entity_tag(file_size, modified_time);
 
     Response response;
     const std::string content_type = mime_type(candidate);
     response.headers["content-type"] = content_type;
     response.headers["accept-ranges"] = "bytes";
+    if (!etag.empty()) {
+        response.headers["etag"] = etag;
+    }
+    if (!last_modified.empty()) {
+        response.headers["last-modified"] = last_modified;
+    }
 
     const auto range = parse_range(request, file_size);
-    if (range.requested && !range.satisfiable) {
+    const bool honor_range = range.requested && !etag.empty() && if_range_allows_range(request, etag, last_modified);
+    if (honor_range && (range.malformed || range.ranges.empty())) {
         response.status = 416;
         response.reason = reason_phrase(response.status);
         response.headers["content-range"] = "bytes */" + std::to_string(file_size);
@@ -587,12 +765,22 @@ Response file_response(const Request& request, const std::filesystem::path& docu
         return response;
     }
 
-    if (range.satisfiable) {
-        const auto length = range.end - range.start + 1;
+    if (honor_range && range.ranges.size() == 1) {
+        const auto selected = range.ranges.front();
+        const auto length = selected.end - selected.start + 1;
         response.status = 206;
         response.reason = reason_phrase(response.status);
-        response.headers["content-range"] = "bytes " + std::to_string(range.start) + "-" + std::to_string(range.end) + "/" + std::to_string(file_size);
-        response.body = read_file_range(candidate, range.start, length);
+        response.headers["content-range"] = "bytes " + std::to_string(selected.start) + "-" + std::to_string(selected.end) + "/" + std::to_string(file_size);
+        response.body = read_file_range(candidate, selected.start, length);
+        return response;
+    }
+
+    if (honor_range && range.ranges.size() > 1) {
+        const auto boundary = multipart_boundary(file_size, modified_time);
+        response.status = 206;
+        response.reason = reason_phrase(response.status);
+        response.headers["content-type"] = "multipart/byteranges; boundary=" + boundary;
+        response.body = multipart_range_body(candidate, range.ranges, file_size, content_type, boundary);
         return response;
     }
 

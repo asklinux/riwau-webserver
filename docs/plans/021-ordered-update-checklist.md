@@ -38,18 +38,21 @@ Untuk setiap item:
   - Done criteria: parsing/framing HTTP/1.1 boleh diuji tanpa socket event loop.
 - [x] Tambah integration tests untuk keep-alive, max request cap, idle timeout, pipelining, chunked body, range, gzip, WebSocket echo, dan WebSocket proxy.
   - Done criteria: semua behavior utama HTTP/1.1 ada coverage automatik.
-- [ ] Implement streaming request body dengan backpressure.
+- [x] Implement streaming request body dengan backpressure.
   - Done criteria: large upload tidak perlu buffer seluruh body dalam memori.
-  - Status: Partial; HTTP/1.1 body besar kini discroll ke fail sementara selepas header lengkap, tetapi handler-level streaming API, reverse proxy request streaming, dan backpressure contract penuh belum siap.
+  - Status: File-backed large-body spool keeps large uploads out of full memory buffering, and handlers now have `RequestBodyReader` pull reads from memory or spool files. Live in-flight request body dispatch, reverse proxy request streaming, and explicit network-level backpressure remain future work.
 - [x] Implement response chunking.
   - Done criteria: handler boleh hantar response streaming tanpa `Content-Length` awal.
   - Status: Basic HTTP/1.1 chunked response API/serialization implemented through `ResponseSink::send_chunked`; producer-side async streaming/backpressure remains future work.
-- [ ] Implement multipart range dan `If-Range`.
+- [x] Implement multipart range dan `If-Range`.
   - Done criteria: static file video/large file support lebih lengkap.
-- [ ] Decide dan implement Brotli jika dependency/bundling diterima.
+  - Status: Static file response supports single and multipart byte ranges, generated ETag/Last-Modified validators, and `If-Range` match handling.
+- [x] Decide dan implement Brotli jika dependency/bundling diterima.
   - Done criteria: ADR wujud dan compression test lulus, atau keputusan rasmi untuk tidak implement.
-- [ ] Tambah configurable directory index dan custom error page.
+  - Status: Decision accepted to defer Brotli in P1 because no bundled dependency/deployment approach has been accepted.
+- [x] Tambah configurable directory index dan custom error page.
   - Done criteria: SQLite config dan test wujud.
+  - Status: SQLite keys `directory_index` and `error_page` are implemented, validated, wired through static/vhost handlers, and covered by unit/network tests.
 
 ## Phase 2: Security And WAF Hardening
 

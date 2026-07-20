@@ -93,6 +93,68 @@ int main()
     }
 
     {
+        auto request = make_request("GET", "/video.mp4");
+        request.headers["range"] = "bytes=0-1,4-5";
+
+        const auto response = rimau::http::file_response(request, root);
+        assert(response.status == 206);
+        assert(response.headers.at("content-type").starts_with("multipart/byteranges; boundary=rimau-"));
+        assert(response.body.find("Content-Range: bytes 0-1/16\r\n") != std::string::npos);
+        assert(response.body.find("\r\n01\r\n") != std::string::npos);
+        assert(response.body.find("Content-Range: bytes 4-5/16\r\n") != std::string::npos);
+        assert(response.body.find("\r\n45\r\n") != std::string::npos);
+    }
+
+    {
+        auto request = make_request("GET", "/video.mp4");
+        request.headers["range"] = "bytes=0-1";
+
+        const auto ranged = rimau::http::file_response(request, root);
+        assert(ranged.status == 206);
+        assert(ranged.headers.contains("etag"));
+
+        auto mismatch = make_request("GET", "/video.mp4");
+        mismatch.headers["range"] = "bytes=0-1";
+        mismatch.headers["if-range"] = "\"not-current\"";
+        const auto full = rimau::http::file_response(mismatch, root);
+        assert(full.status == 200);
+        assert(full.body == "0123456789abcdef");
+
+        auto matched = make_request("GET", "/video.mp4");
+        matched.headers["range"] = "bytes=0-1";
+        matched.headers["if-range"] = ranged.headers.at("etag");
+        const auto partial = rimau::http::file_response(matched, root);
+        assert(partial.status == 206);
+        assert(partial.body == "01");
+    }
+
+    {
+        {
+            std::ofstream file(root / "home.html", std::ios::binary);
+            file << "custom index";
+        }
+        {
+            std::ofstream file(root / "error.html", std::ios::binary);
+            file << "custom error";
+        }
+
+        rimau::http::StaticFileOptions options;
+        options.directory_index = "home.html";
+        options.error_page = "error.html";
+
+        auto index_request = make_request("GET", "/");
+        const auto index_response = rimau::http::file_response(index_request, root, options);
+        assert(index_response.status == 200);
+        assert(index_response.body == "custom index");
+
+        auto missing_request = make_request("GET", "/missing.html");
+        const auto missing_response = rimau::http::file_response(missing_request, root, options);
+        assert(missing_response.status == 404);
+        assert(missing_response.body == "custom error");
+        assert(missing_response.headers.at("content-type") == "text/html; charset=utf-8");
+    }
+
+    {
         {
             std::ofstream file(root / "app.js", std::ios::binary);
             for (int index = 0; index < 128; ++index) {

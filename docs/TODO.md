@@ -13,19 +13,16 @@
 
 - Add transaction IDs that are unique per connection/session.
 - Add integration tests for virtual host routing, fallback host behavior, reverse proxy success/failure, WebSocket proxy HTTP/HTTPS upstream behavior, and script-placeholder 501 behavior.
-- Complete handler-level streaming request body API with backpressure for large uploads; current HTTP/1.1 code only provides file-backed body spooling before handler dispatch.
+- Add live in-flight request body streaming before handler dispatch and explicit network-level backpressure contract; current HTTP/1.1 code provides file-backed body spooling and handler pull reads through `RequestBodyReader`.
 - Expose chunked trailers to handlers or explicitly discard them through a documented policy.
 - Add producer-side async response streaming/backpressure beyond current basic chunked response serialization.
-- Add multipart range responses and `If-Range` handling for static files.
-- Add Brotli compression if the dependency and deployment approach are accepted. Needs verification.
+- Revisit Brotli only if a bundled dependency and deployment approach are accepted; P1 decision is to defer Brotli.
 - Add WebSocket application routing, fragmentation support, subprotocol negotiation, extension policy, frame-aware proxy limits, and backpressure policy.
 - Add structured JSON parser/serializer integration if application routing needs JSON DOM access. Needs verification.
-- Add directory index behavior config.
 - Add automated network integration tests for request/header/body/idle timeout and slow-client behavior.
 - Add adaptive slow-client protection beyond fixed timeout. Needs verification.
 - Add graceful shutdown integration tests for active/idle connections.
 - Add access log format.
-- Add error page customization.
 
 ## P1 - Configuration
 

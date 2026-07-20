@@ -10,7 +10,7 @@ Rimau Web Server ialah projek untuk membina web server menggunakan C++ dengan sa
 - Menyokong HTTP/1.1, HTTP/2, dan HTTP/3.
 - Menyediakan struktur modular supaya transport, parser, scheduler, logging, config, static file, TLS, dan plugin boleh dibangunkan secara berperingkat.
 
-Status semasa bukan web server production-ready. Scaffold awal sudah diwujudkan dengan HTTP/1.1 praktikal untuk static serving, body framing asas, file-backed request body spooling untuk upload besar, basic chunked response API, keep-alive, pipelining asas, range, gzip, WebSocket echo asas, WebSocket reverse proxy tunneling untuk proxy vhost, TLS hardening asas termasuk multi-certificate SNI, kawalan keselamatan asas, WAF terbina dalam yang ModSecurity-compatible dengan subset rules OWASP CRS-inspired, virtual host static, baseline HTTP reverse proxy dengan passive circuit breaker, HTTP/2 wire codec partial, cleartext h2c dan TLS ALPN `h2` request serving asas, dan HTTP/3 wire codec primitives.
+Status semasa bukan web server production-ready. Scaffold awal sudah diwujudkan dengan HTTP/1.1 praktikal untuk static serving, body framing asas, file-backed request body spooling dan pull reader untuk upload besar, basic chunked response API, keep-alive, pipelining asas, multipart range dan `If-Range`, gzip, configurable directory index dan custom error page, WebSocket echo asas, WebSocket reverse proxy tunneling untuk proxy vhost, TLS hardening asas termasuk multi-certificate SNI, kawalan keselamatan asas, WAF terbina dalam yang ModSecurity-compatible dengan subset rules OWASP CRS-inspired, virtual host static, baseline HTTP reverse proxy dengan passive circuit breaker, HTTP/2 wire codec partial, cleartext h2c dan TLS ALPN `h2` request serving asas, dan HTTP/3 wire codec primitives.
 
 Pada 2026-07-18, projek ini mula mengadaptasi konsep seni bina daripada Proxygen (`https://github.com/facebook/proxygen`) secara konseptual sahaja. Kod Proxygen tidak disalin ke repo ini.
 
@@ -34,7 +34,7 @@ Implemented:
 - Per-worker `SO_REUSEPORT` listeners
 - TCP keepalive untuk accepted client sockets
 - HTTP/1.1 keep-alive dengan SQLite-configured idle timeout dan max requests per connection
-- HTTP/1.1 request body accumulator dengan 16 KiB in-memory threshold dan `mkstemp`-backed temporary-file spooling untuk body besar sebelum handler dispatch
+- HTTP/1.1 request body accumulator dengan 16 KiB in-memory threshold, `mkstemp`-backed temporary-file spooling untuk body besar sebelum handler dispatch, dan `RequestBodyReader` pull API untuk handler membaca body secara chunk
 - HTTP/1.1 chunked response serialization melalui `ResponseSink::send_chunked`, `ResponseBuilder::send_chunked`, dan `Response::to_http_chunked_string`
 - Connection object pool yang mengekalkan buffer capacity untuk mengurangkan malloc/free
 - SIGHUP live reload terhad untuk SQLite config yang tidak memerlukan listener/worker restart
@@ -160,8 +160,8 @@ Not present:
 - `rimau::core::Server`: Mencipta dan reload TLS context termasuk SNI certificate contexts apabila `tls_enabled=true`.
 - `rimau::http::next_http1_request_frame`: HTTP/1.1 buffered framing untuk headers, `Content-Length`, chunked transfer decoding, request pipelining boundary, dan framing error tanpa socket event loop.
 - `rimau::http::parse_request`: Parser asas HTTP/1.0 dan HTTP/1.1 untuk request line, headers, URL-decoded path, query params, dan buffered body.
-- `rimau::http::Request`: Request object yang menyimpan body kecil dalam memori dan boleh merujuk body besar dalam fail sementara melalui `RequestBodyFile`, `body_size()`, `body_spooled_to_file()`, dan `body_text()`.
-- `rimau::http::file_response`: Static file response untuk GET dan HEAD, termasuk MIME type, single range, dan gzip untuk content compressible.
+- `rimau::http::Request`: Request object yang menyimpan body kecil dalam memori dan boleh merujuk body besar dalam fail sementara melalui `RequestBodyFile`, `body_size()`, `body_spooled_to_file()`, `body_text()`, dan `open_body_reader()`.
+- `rimau::http::file_response`: Static file response untuk GET dan HEAD, termasuk MIME type, single/multipart range, `If-Range`, directory index option, custom error page option, dan gzip untuk content compressible.
 - `rimau::http::RequestHandler`: Interface untuk logic request per transaction.
 - `rimau::http::RequestHandlerFactory`: Factory untuk membina handler bagi setiap request.
 - `rimau::http::ResponseSink`: Interface downstream untuk menghantar response normal atau chunked tanpa mengikat handler kepada HTTP/1.1 socket.
@@ -342,13 +342,14 @@ Production deployment, service manager, packaging, container, TLS certificate ha
 - HTTP method support untuk GET, POST, PUT, PATCH, DELETE, OPTIONS, dan HEAD.
 - Content-Length request body parsing.
 - Chunked transfer decoding untuk request body.
-- HTTP/1.1 large request body spooling ke fail sementara dengan threshold memori 16 KiB sebelum request dispatch.
+- HTTP/1.1 large request body spooling ke fail sementara dengan threshold memori 16 KiB sebelum request dispatch, serta `RequestBodyReader` untuk pull-style chunk reads dalam handler.
 - Basic HTTP/1.1 chunked response API dan serializer tanpa `Content-Length` awal.
 - Request pipelining asas: request seterusnya boleh dibuffer dan diproses selepas response sebelumnya ditulis.
 - URL decoding dan query parameter parsing.
 - JSON request detection dan JSON response untuk method body scaffold.
 - Basic MIME type detection termasuk text, image, video, wasm, dan pdf types umum.
-- Range request single-range untuk static files.
+- Single dan multipart byte range request untuk static files, termasuk `If-Range` strong ETag atau Last-Modified match handling.
+- SQLite-configurable static `directory_index` dan optional custom `error_page`.
 - Gzip compression untuk static response yang compressible apabila client menghantar `Accept-Encoding: gzip`.
 - Basic WebSocket upgrade dan echo dua hala untuk text/binary frames, ping/pong, dan close untuk host bukan proxy.
 - WebSocket reverse proxy tunneling untuk proxy vhost dengan upstream `http://` atau `https://`.
@@ -372,13 +373,13 @@ Production deployment, service manager, packaging, container, TLS certificate ha
 - Built-in ModSecurity-compatible WAF untuk HTTP/1.1, WebSocket upgrade, WebSocket proxy upgrade, dan partial HTTP/2 request path. Rule set semasa ialah subset OWASP CRS-inspired yang dikompil dalam kod Rimau, bukan full `libmodsecurity` atau full OWASP CRS.
 - Script virtual host declaration dengan runtime name seperti `php`, `python`, atau `perl`; execution belum implemented dan response semasa ialah `501`.
 - HTTP/1.1 keep-alive.
-- SIGHUP reload untuk dynamic SQLite config seperti `document_root`, `max_request_bytes`, HTTP keep-alive settings, timeout, security limit, IP list, dan TLS certificate/key/TLS settings untuk sambungan baharu; listener dan worker changes masih memerlukan restart.
+- SIGHUP reload untuk dynamic SQLite config seperti `document_root`, `directory_index`, `error_page`, `max_request_bytes`, HTTP keep-alive settings, timeout, security limit, IP list, dan TLS certificate/key/TLS settings untuk sambungan baharu; listener dan worker changes masih memerlukan restart.
 - Proxygen-inspired handler/factory/transaction/response-sink pipeline.
 - Parser test asas melalui CTest.
 - Response serializer test asas melalui CTest.
 - Handler pipeline test asas melalui CTest.
 - HTTP/1.1 session/framing test melalui CTest tanpa socket event loop.
-- HTTP/1.1 network integration test melalui CTest untuk keep-alive, max request cap, idle timeout, pipelining, chunked body, range, gzip, WebSocket echo, dan WebSocket proxy.
+- HTTP/1.1 network integration test melalui CTest untuk keep-alive, max request cap, idle timeout, pipelining, chunked body, range, gzip, directory index, custom error page, WebSocket echo, dan WebSocket proxy.
 - SQLite config database test asas melalui CTest.
 - CLI integration test melalui CTest untuk `--database`, `--set`, `--check-config`, dan `--protocols`.
 - Protocol capability test asas melalui CTest.
@@ -392,7 +393,7 @@ Production deployment, service manager, packaging, container, TLS certificate ha
 
 ## Current Implementation Status
 
-- HTTP/1.1: Partial; body besar boleh discroll ke fail sementara dan basic chunked response API sudah ada, tetapi handler-level request streaming/backpressure dan producer-side async response backpressure belum lengkap.
+- HTTP/1.1: Partial; body besar boleh discroll ke fail sementara dan dibaca handler melalui pull reader, basic chunked response API, multipart range/`If-Range`, configurable directory index, dan custom error page sudah ada. Live in-flight request streaming sebelum handler dispatch, reverse proxy body streaming, dan producer-side async response backpressure belum lengkap.
 - HTTP/2: Partial h2c dan TLS ALPN `h2` request serving; frame codec, SETTINGS/PING, HEADERS/DATA path, HPACK baseline, and shared handler pipeline dispatch exist. Continuation assembly, full HPACK dynamic/Huffman behavior, and flow control masih Planned.
 - HTTP/3: Partial wire codec primitives; UDP/QUIC/QPACK/live request serving masih Planned.
 - TLS: Partial for HTTP/1.1 HTTPS and HTTP/2 ALPN `h2` basics with TLS 1.2/1.3, SNI validation, multi-certificate SNI selection, ALPN `http/1.1`/`h2`, safe cipher config, and new-connection certificate reload.
@@ -411,14 +412,13 @@ Production deployment, service manager, packaging, container, TLS certificate ha
 
 - Server menggunakan Linux `epoll` multi-worker, tetapi masih belum ada benchmark prestasi atau zero-copy static file path.
 - Bind config menyokong IPv4 atau IPv6 literal, tetapi belum ada hostname resolution atau dual listener eksplisit untuk bind IPv4 dan IPv6 serentak.
-- Request body besar untuk HTTP/1.1 boleh discroll ke fail sementara sebelum handler dispatch, tetapi belum ada handler-level streaming API atau reverse proxy request-body streaming/backpressure.
+- Request body besar untuk HTTP/1.1 boleh discroll ke fail sementara sebelum handler dispatch dan dibaca handler melalui `RequestBodyReader`, tetapi live in-flight request streaming sebelum handler dispatch, reverse proxy request-body streaming, dan network-level backpressure contract penuh belum siap.
 - Basic chunked response API sudah ada, tetapi chunks masih dikumpulkan dan diserialkan ke buffer response sebelum socket write; producer-side async response streaming/backpressure belum siap.
 - Chunked trailers dibaca untuk tamat message tetapi belum didedahkan kepada handler.
 - JSON request belum diparse kepada DOM/structured object; body JSON hanya dikesan melalui `Content-Type` dan diecho sebagai string selamat.
 - PUT/PATCH/DELETE tidak memutasi fail; scaffold semasa pulang JSON metadata/body untuk method tersebut.
 - Request pipelining asas sudah ada, tetapi belum ada stress/integration test luas untuk ordering/backpressure.
-- Range request hanya single range; multipart byte ranges belum implemented.
-- Compression hanya gzip melalui bundled static zlib; Brotli belum implemented.
+- Compression hanya gzip melalui bundled static zlib; Brotli ditangguh dalam P1 kerana tiada bundled dependency yang diterima.
 - `rimau-server` semasa validated sebagai static ELF: `ldd build/rimau-server` melaporkan `not a dynamic executable`, dan `readelf` tidak menunjukkan dynamic interpreter. Caveat: static glibc DNS/NSS untuk `getaddrinfo`/`gethostbyname` masih memberi linker warning dan perlu ujian production tambahan, terutama reverse proxy upstream hostname. Needs verification.
 - HTTP/2 support baru melayan request asas melalui cleartext h2c prior knowledge dan TLS ALPN `h2`; full multiplexing semantics, continuation assembly, HPACK Huffman, HPACK dynamic table persistence, dan flow control penuh belum implemented.
 - HTTP/3 support belum live di network; codec semasa hanya QUIC varint/frame/SETTINGS primitives tanpa QUIC transport atau QPACK.

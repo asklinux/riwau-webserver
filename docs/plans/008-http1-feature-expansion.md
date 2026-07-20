@@ -29,13 +29,13 @@ Expand Rimau HTTP/1.1 behavior beyond static GET/HEAD so the server can handle c
 
 ## Deliberate Limits
 
-- Request bodies are buffered in memory up to `max_request_bytes`; no streaming body API yet.
+- Request bodies are accumulated with file-backed spooling for large uploads and exposed to handlers through `RequestBodyReader`; live in-flight request body dispatch before full body receipt is still future work.
 - Chunked trailers are consumed for message framing but not exposed to handlers.
 - JSON is not parsed into a structured object; scaffold handlers only echo escaped body text and metadata.
 - PUT, PATCH, and DELETE do not mutate files.
 - Request pipelining has basic ordering behavior only; broad stress tests and backpressure policy are still pending.
-- Static file range support is single-range only; multipart ranges and `If-Range` are not implemented.
-- Compression is gzip only through zlib; Brotli is not implemented. Plan 015 later changes zlib from a system dependency to bundled static zlib.
+- Static file range support includes single-range, multipart ranges, and `If-Range`.
+- Compression is gzip only through bundled static zlib; Brotli is intentionally deferred until a bundled dependency is accepted.
 - Static file reads remain synchronous and memory-buffered.
 - WebSocket support is a basic echo path only; fragmentation, extensions, subprotocol negotiation, application routing, and robust backpressure are not implemented.
 - At this phase HTTP/2 and HTTP/3 remained config/status gates only. Plan 017 later adds partial wire codec support.
@@ -54,7 +54,7 @@ Manual smoke tests used a temporary SQLite database and covered:
 - OPTIONS response.
 - POST, PUT, PATCH, and DELETE JSON scaffold responses.
 - Chunked POST decoding.
-- Single-range GET response with `206 Partial Content`.
+- Single-range GET response with `206 Partial Content`; later P1 work added multipart ranges and `If-Range`.
 - Gzip response when `Accept-Encoding: gzip` is present.
 - Two GET requests sent over one socket for basic pipelining.
 - WebSocket upgrade and text echo over a raw socket.
@@ -62,4 +62,4 @@ Manual smoke tests used a temporary SQLite database and covered:
 
 ## Follow-Up Work
 
-See `docs/TODO.md` for current next work. The largest HTTP/1.1 follow-ups are handler-level streaming request bodies beyond the current file-backed body spooling step, producer-side async response streaming/backpressure beyond current basic chunked response serialization, multipart ranges, Brotli, advanced slow-client protection, richer WebSocket routing, zero-copy static file serving, and broader integration/stress tests.
+See `docs/TODO.md` for current next work. The largest HTTP/1.1 follow-ups are live in-flight request body streaming before handler dispatch beyond the current file-backed body spooling plus `RequestBodyReader`, producer-side async response streaming/backpressure beyond current basic chunked response serialization, Brotli if a bundled dependency is accepted, advanced slow-client protection, richer WebSocket routing, zero-copy static file serving, and broader integration/stress tests.

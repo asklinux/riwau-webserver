@@ -15,6 +15,8 @@ struct ServerConfig {
     std::string host = "0.0.0.0";
     std::uint16_t port = 8080;
     std::filesystem::path document_root = "public";
+    std::string directory_index = "index.html";
+    std::filesystem::path error_page;
     std::size_t max_request_bytes = 64 * 1024;
     bool http_keep_alive_enabled = true;
     int http_keep_alive_timeout_seconds = 15;

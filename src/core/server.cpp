@@ -3201,7 +3201,8 @@ private:
         rimau::http::VirtualHostHandlerFactory handler_factory(
             config_->document_root,
             config_->virtual_hosts_enabled ? config_->virtual_hosts : "",
-            reverse_proxy_settings());
+            reverse_proxy_settings(),
+            static_file_options());
         BufferedResponseSink downstream;
         rimau::http::Transaction transaction(static_cast<std::uint64_t>(requests_served_), *built.request);
         transaction.dispatch(handler_factory, downstream);
@@ -3239,6 +3240,14 @@ private:
         settings.circuit_breaker_failure_threshold = config_->reverse_proxy_circuit_breaker_failure_threshold;
         settings.circuit_breaker_cooldown_seconds = config_->reverse_proxy_circuit_breaker_cooldown_seconds;
         return settings;
+    }
+
+    rimau::http::StaticFileOptions static_file_options() const
+    {
+        rimau::http::StaticFileOptions options;
+        options.directory_index = config_->directory_index;
+        options.error_page = config_->error_page;
+        return options;
     }
 
     rimau::http::WafSettings waf_settings() const
@@ -3439,7 +3448,8 @@ private:
         rimau::http::VirtualHostHandlerFactory handler_factory(
             config_->document_root,
             config_->virtual_hosts_enabled ? config_->virtual_hosts : "",
-            reverse_proxy_settings());
+            reverse_proxy_settings(),
+            static_file_options());
         BufferedResponseSink downstream;
         rimau::http::Transaction transaction(static_cast<std::uint64_t>(requests_served_), std::move(request));
         transaction.dispatch(handler_factory, downstream);

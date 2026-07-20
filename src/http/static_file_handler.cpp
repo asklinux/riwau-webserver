@@ -2,6 +2,7 @@
 
 #include "rimau/http/response.hpp"
 
+#include <algorithm>
 #include <sstream>
 #include <utility>
 
@@ -43,6 +44,17 @@ std::string query_params_json(const Request& request)
 
 Response method_json_response(const Request& request)
 {
+    std::string body;
+    body.reserve(std::min<std::size_t>(request.body_size(), 64 * 1024));
+    auto reader = request.open_body_reader();
+    while (body.size() < 64 * 1024 && !reader.eof()) {
+        auto chunk = reader.read_chunk(std::min<std::size_t>(8192, 64 * 1024 - body.size()));
+        if (chunk.empty()) {
+            break;
+        }
+        body += std::move(chunk);
+    }
+
     std::ostringstream output;
     output << "{"
            << "\"method\":\"" << json_escape(request.method) << "\","
@@ -52,7 +64,6 @@ Response method_json_response(const Request& request)
            << "\"body_size\":" << request.body_size() << ","
            << "\"json_request\":" << (request.is_json() ? "true" : "false") << ",";
 
-    const auto body = request.body_text(64 * 1024);
     output << "\"body\":\"" << json_escape(body) << "\","
            << "\"body_truncated\":" << (request.body_size() > body.size() ? "true" : "false") << ","
            << "\"body_spooled\":" << (request.body_spooled_to_file() ? "true" : "false");
@@ -65,8 +76,9 @@ Response method_json_response(const Request& request)
 
 } // namespace
 
-StaticFileHandler::StaticFileHandler(std::filesystem::path document_root)
+StaticFileHandler::StaticFileHandler(std::filesystem::path document_root, StaticFileOptions options)
     : document_root_(std::move(document_root))
+    , options_(std::move(options))
 {
 }
 
@@ -92,21 +104,22 @@ void StaticFileHandler::on_request(const Request& request, ResponseSink& downstr
 
     if (request.method == "GET" || request.method == "HEAD") {
         const auto body_mode = request.method == "HEAD" ? BodyMode::headers_only : BodyMode::include;
-        downstream.send(file_response(request, document_root_), body_mode);
+        downstream.send(file_response(request, document_root_, options_), body_mode);
         return;
     }
 
     downstream.send(method_json_response(request));
 }
 
-StaticFileHandlerFactory::StaticFileHandlerFactory(std::filesystem::path document_root)
+StaticFileHandlerFactory::StaticFileHandlerFactory(std::filesystem::path document_root, StaticFileOptions options)
     : document_root_(std::move(document_root))
+    , options_(std::move(options))
 {
 }
 
 std::unique_ptr<RequestHandler> StaticFileHandlerFactory::create(const Request&) const
 {
-    return std::make_unique<StaticFileHandler>(document_root_);
+    return std::make_unique<StaticFileHandler>(document_root_, options_);
 }
 
 } // namespace rimau::http

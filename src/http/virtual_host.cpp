@@ -1104,10 +1104,12 @@ void record_reverse_proxy_upstream_failure(const ReverseProxyTarget& upstream, c
 VirtualHostHandlerFactory::VirtualHostHandlerFactory(
     std::filesystem::path default_document_root,
     std::string virtual_hosts_config,
-    ReverseProxySettings proxy_settings)
+    ReverseProxySettings proxy_settings,
+    StaticFileOptions static_file_options)
     : default_document_root_(std::move(default_document_root))
     , rules_(parse_virtual_host_rules(virtual_hosts_config))
     , proxy_settings_(proxy_settings)
+    , static_file_options_(std::move(static_file_options))
 {
 }
 
@@ -1115,11 +1117,11 @@ std::unique_ptr<RequestHandler> VirtualHostHandlerFactory::create(const Request&
 {
     const auto* rule = select_virtual_host_rule(request, rules_);
     if (!rule) {
-        return std::make_unique<StaticFileHandler>(default_document_root_);
+        return std::make_unique<StaticFileHandler>(default_document_root_, static_file_options_);
     }
 
     if (rule->action == VirtualHostAction::static_files) {
-        return std::make_unique<StaticFileHandler>(rule->document_root);
+        return std::make_unique<StaticFileHandler>(rule->document_root, static_file_options_);
     }
 
     if (rule->action == VirtualHostAction::reverse_proxy) {

@@ -36,10 +36,12 @@ Implemented:
 - Content-Length request body parsing.
 - Chunked request body decoding.
 - HTTP/1.1 file-backed request body spooling for large Content-Length and chunked bodies before handler dispatch.
+- HTTP/1.1 pull-style request body reader through `Request::open_body_reader()` and `RequestBodyReader::read_chunk()`.
 - Basic HTTP/1.1 chunked response API and serialization through `ResponseSink::send_chunked`, `ResponseBuilder::send_chunked`, and `Response::to_http_chunked_string`.
 - URL decoding and query parameter parsing.
 - JSON request detection and JSON scaffold responses for methods with bodies.
-- Single-range static file responses.
+- Single-range and multipart static file responses with `If-Range` handling.
+- SQLite-configurable static `directory_index` and optional custom `error_page`.
 - Gzip static response compression through bundled static zlib.
 - Basic WebSocket upgrade and two-way echo.
 - WebSocket reverse proxy tunneling for proxy virtual hosts with `http://` and `https://` upstreams.
@@ -104,7 +106,7 @@ Partial:
 - Logging hanya ke stderr.
 - Path traversal protection asas.
 - MIME detection by common file extension.
-- HTTP/1.1 support is partial; file-backed large-body spooling and basic chunked response API exist, but handler-level streaming request body API, producer-side async response backpressure, multipart ranges, Brotli, full WebSocket application routing, and broad stress validation are not implemented.
+- HTTP/1.1 support is partial; file-backed large-body spooling, handler pull body reader, basic chunked response API, multipart range/`If-Range`, directory index config, and custom error page exist, but live in-flight request body dispatch, reverse proxy request/response streaming, producer-side async response backpressure, Brotli, full WebSocket application routing, and broad stress validation are not implemented.
 - Proxygen-inspired pipeline is partial; filter chain, async handler body streaming, and full protocol session adapters are not implemented.
 - SQLite config is partial; schema version table exists, but multi-step migration framework, admin UI, and config backup policy are not implemented. SIGHUP live reload is implemented only for restart-free dynamic values.
 - TLS is partial; production certificate lifecycle and OCSP are not implemented. HTTP/2 ALPN `h2` request serving exists only as a partial basic path, not production-complete HTTP/2.
@@ -139,16 +141,16 @@ Semasa pemeriksaan awal pada 2026-07-18:
 | --- | --- | --- |
 | Build system | Implemented | CMake with bundled static OpenSSL, SQLite, zlib, Bison, Linux UAPI headers, and glibc targets; `rimau-server` is fully static in current Linux x86_64 validation. |
 | CLI | Partial | `--database`, `--set`, `--check-config`, `--protocols`, `--version`, `--help`. |
-| HTTP/1.1 | Partial | GET/HEAD static, POST/PUT/PATCH/DELETE JSON scaffold, OPTIONS, Content-Length, chunked decode, file-backed large-body spooling, basic chunked response API, keep-alive, basic pipelining, range, gzip, WebSocket echo, WebSocket reverse proxy tunnel, and extracted testable request framing. |
+| HTTP/1.1 | Partial | GET/HEAD static, POST/PUT/PATCH/DELETE JSON scaffold, OPTIONS, Content-Length, chunked decode, file-backed large-body spooling, pull request-body reader, basic chunked response API, keep-alive, basic pipelining, single/multipart range with `If-Range`, gzip, configurable directory index/custom error page, WebSocket echo, WebSocket reverse proxy tunnel, and extracted testable request framing. |
 | HTTP/2 | Partial | Frame codec, SETTINGS/PING basics, HPACK baseline, cleartext h2c and TLS ALPN `h2` HEADERS/DATA request serving through the shared handler pipeline exist; no production flow control, CONTINUATION assembly, HPACK Huffman, or dynamic-table persistence yet. |
 | HTTP/3 | Partial | QUIC varint, frame codec, and SETTINGS codec exist; no UDP/QUIC/QPACK/live serving yet. |
 | TLS | Partial | HTTP/1.1 HTTPS and partial HTTP/2 ALPN `h2` via bundled static OpenSSL 4.0.1 with TLS 1.2/1.3, SNI validation, multi-certificate SNI selection, ALPN `http/1.1`/`h2`, safe cipher config, and SIGHUP context reload for new connections. |
-| Static files | Partial | Serves from `document_root`. |
+| Static files | Partial | Serves from `document_root`, supports configurable directory index/custom error page, MIME detection, gzip, single/multipart range, and `If-Range`; no zero-copy path yet. |
 | Virtual hosts | Partial | Exact host and simple `*.domain` matching, static vhost, proxy vhost, and script declarations. |
 | Reverse proxy | Partial | HTTP/HTTPS upstream, optional default-trust-path certificate verification, buffered normal HTTP response, WebSocket tunnel data path in worker `epoll`, basic round-robin, retry/failover, and passive circuit breaker; no per-upstream CA/pinning policy, active health checks, normal HTTP proxy streaming, or upstream connection pooling yet. |
 | Server-side runtimes | Planned | `script:runtime:path` config returns `501`; PHP/Python/Perl are not bundled or executed yet. |
 | Request pipeline | Partial | Handler/factory/transaction/response sink implemented for static, vhost, reverse proxy, and script-placeholder HTTP/1.1. |
-| Config | Partial | SQLite table `rimau_config`, schema metadata table `rimau_schema_migrations`, protocol, TLS, keep-alive, timeout, rate-limit, IP-list, security-header, virtual-host/proxy keys, and limited SIGHUP reload behavior. |
+| Config | Partial | SQLite table `rimau_config`, schema metadata table `rimau_schema_migrations`, protocol, TLS, keep-alive, static file, timeout, rate-limit, IP-list, security-header, virtual-host/proxy keys, and limited SIGHUP reload behavior. |
 | Security | Partial | Baseline HTTP framing hardening, timeout, rate limit, connection limit, built-in ModSecurity-compatible WAF subset, configurable security header values, and IPv4/IPv6 IP allow/block list are implemented; fuzzing, full ModSecurity/CRS integration, and production hardening remain pending. |
 | Tests | Partial | Parser, HTTP/1.1 session/framing, HTTP/1.1 network integration, response serializer, handler pipeline, SQLite config, CLI config, protocol capability, HTTP/2 wire, HTTP/3 wire, virtual host, and WAF tests. |
 | Deployment | Planned | No production deployment files. |
@@ -1200,7 +1202,7 @@ HTTP/1.1 network integration test update:
 - Added `tests/test_http1_network.py`.
 - Added CTest case `rimau_http1_network`.
 - The test starts `rimau-server` with a temporary SQLite database and temporary document root.
-- Automated coverage now includes HTTP/1.1 keep-alive, keep-alive max request cap, idle timeout, request pipelining, chunked request body decoding, single range response, gzip static response, local WebSocket echo, and WebSocket reverse proxy tunneling through a Python upstream.
+- Automated coverage now includes HTTP/1.1 keep-alive, keep-alive max request cap, idle timeout, request pipelining, chunked request body decoding, single range response, gzip static response, local WebSocket echo, and WebSocket reverse proxy tunneling through a Python upstream. Later P1 coverage adds configurable directory index and custom error page.
 - Marked the Phase 1 HTTP/1.1 integration checklist item complete in `docs/plans/021-ordered-update-checklist.md`.
 
 Validation on 2026-07-20 after HTTP/1.1 network integration test update:
@@ -1350,4 +1352,40 @@ Result:
 - Build passed; static glibc DNS/NSS linker warnings for `getaddrinfo`/OpenSSL `gethostbyname` remain.
 - Targeted response/handler/HTTP1 tests passed, 4/4 tests.
 - `./build/rimau-server --protocols` passed and reports HTTP/1.1 basic chunked response serialization.
+- Full CTest passed, 12/12 tests.
+
+HTTP/1.1 P1 stabilization completion update:
+
+- Added `RequestBodyReader` and `Request::open_body_reader()` so handlers can pull request bodies in bounded chunks from memory or file-backed spool storage.
+- Updated the scaffold JSON method handler to read body preview through `RequestBodyReader`.
+- Added static file multipart byte-range responses and `If-Range` handling using generated strong ETag and Last-Modified validators.
+- Added static `directory_index` and optional `error_page` SQLite config keys.
+- Wired static file options through `StaticFileHandler`, `StaticFileHandlerFactory`, `VirtualHostHandlerFactory`, HTTP/1.1 dispatch, and partial HTTP/2 dispatch.
+- Added unit and network coverage for request body reader, multipart range, `If-Range`, config keys, directory index, and custom error page.
+- Accepted the P1 Brotli decision to defer Brotli until a bundled dependency is explicitly selected and pinned.
+- Marked all Phase 1 HTTP/1.1 stabilization items complete in `docs/plans/021-ordered-update-checklist.md`.
+
+Known limits from this update:
+
+- Request bodies are still accumulated before handler dispatch; live in-flight request body streaming and network-level backpressure before dispatch remain future work.
+- Normal reverse proxy request/response streaming still remains future work.
+- Producer-side async response streaming/backpressure remains future work beyond current basic chunked serialization.
+- Brotli remains intentionally unsupported in P1.
+
+Validation on 2026-07-20 after HTTP/1.1 P1 stabilization completion update:
+
+```bash
+cmake --build build
+ctest --test-dir build --output-on-failure -R 'rimau_http_parser|rimau_http_response|rimau_config_database|rimau_virtual_host|rimau_http1_network'
+ctest --test-dir build --output-on-failure -R 'rimau_http_parser|rimau_http_response|rimau_config_database|rimau_virtual_host|rimau_http1_network|rimau_protocol_capabilities'
+./build/rimau-server --protocols
+ctest --test-dir build --output-on-failure
+```
+
+Result:
+
+- Build passed; static glibc DNS/NSS linker warnings for `getaddrinfo`/OpenSSL `gethostbyname` remain.
+- Initial targeted parser/response/config/vhost/HTTP1 network tests passed, 5/5 tests.
+- Targeted parser/response/config/vhost/HTTP1 network/protocol capability tests passed, 6/6 tests.
+- `./build/rimau-server --protocols` passed and reports handler pull reads, single/multipart range with `If-Range`, and configurable directory index/error page in HTTP/1.1.
 - Full CTest passed, 12/12 tests.

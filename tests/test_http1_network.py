@@ -238,6 +238,8 @@ class RimauServer:
 
     def __enter__(self):
         (self.document_root / "index.html").write_text("Rimau HTTP/1 integration\n", encoding="utf-8")
+        (self.document_root / "home.html").write_text("Rimau custom index\n", encoding="utf-8")
+        (self.document_root / "error.html").write_text("Rimau custom error\n", encoding="utf-8")
         (self.document_root / "range.txt").write_bytes(b"0123456789abcdef")
         (self.document_root / "large.txt").write_text("Rimau gzip integration\n" * 64, encoding="utf-8")
 
@@ -245,6 +247,8 @@ class RimauServer:
             f"host=127.0.0.1",
             f"port={self.port}",
             f"document_root={self.document_root}",
+            "directory_index=home.html",
+            "error_page=error.html",
             "max_request_bytes=262144",
             "http_keep_alive_timeout_seconds=1",
             "http_keep_alive_max_requests=2",
@@ -370,6 +374,22 @@ def test_range_and_gzip(port: int) -> None:
     assert gzip.decompress(body) == b"Rimau gzip integration\n" * 64
 
 
+def test_directory_index_and_error_page(port: int) -> None:
+    status, _, _, body = http_request(
+        port,
+        b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+    )
+    assert status == 200, (status, body)
+    assert body == b"Rimau custom index\n", body
+
+    status, _, _, body = http_request(
+        port,
+        b"GET /missing HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+    )
+    assert status == 404, (status, body)
+    assert body == b"Rimau custom error\n", body
+
+
 def test_websocket_echo(port: int) -> None:
     sock = websocket_handshake(port, "localhost")
     try:
@@ -410,6 +430,7 @@ def main() -> int:
         test_chunked_body(server.port)
         test_large_file_backed_body(server.port)
         test_range_and_gzip(server.port)
+        test_directory_index_and_error_page(server.port)
         test_websocket_echo(server.port)
         test_websocket_proxy(server.port, upstream)
 

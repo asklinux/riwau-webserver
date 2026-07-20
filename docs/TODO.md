@@ -9,6 +9,7 @@
 - Add tests for CLI `--set` and `--database`.
 - Add CLI integration tests for `--protocols` with SQLite protocol flags.
 - Verify first GitHub Actions CI run after `.github/workflows/ci.yml` is pushed. Needs verification.
+- Investigate GitHub Actions `startup_failure` runs that complete before any job or log is created. Needs verification.
 - Decide coding style and formatter. Needs verification.
 - Confirm that the existing GitHub repository `LICENSE` GPL-3.0 is the intended license for Rimau Web Server. Needs verification.
 

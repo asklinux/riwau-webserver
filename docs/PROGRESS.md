@@ -1100,3 +1100,5 @@ CI workflow update:
 - First remote GitHub Actions run after push is still pending. Needs verification.
 - Initial workflow run `29711550002` failed with `startup_failure` before jobs were created and without logs; workflow was simplified to remove the cache expression and use a stable hosted-runner label before retrying.
 - Retry workflow run `29711700813` also failed with `startup_failure` before jobs were created and without logs. Local `actionlint` validation passed, so the failure still needs GitHub Actions runner/startup investigation. Needs verification.
+- Third workflow run `29711874922` used `ubuntu-22.04` and still failed with `startup_failure` before jobs were created and without logs.
+- Repository Actions permissions API reports Actions enabled and all actions/workflows allowed; the repo has no self-hosted runners configured. Needs verification whether GitHub-hosted runner startup is unavailable or another repository setting is blocking job creation.

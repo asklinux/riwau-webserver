@@ -19,8 +19,9 @@ Untuk setiap item:
 
 - [x] Initialize atau align workspace tempatan dengan `https://github.com/asklinux/riwau-webserver`.
   - Done criteria: `git status --short --branch` berfungsi dari `/home/data/tunnelbiz/rimauwebserver`.
-- [ ] Confirm license GPL-3.0 memang license projek.
+- [x] Confirm license GPL-3.0 memang license projek.
   - Done criteria: `docs/DECISIONS.md` ada ADR/license note yang accepted atau jelas `Needs verification`.
+  - Status: `LICENSE` contains GPL-3.0 text; ADR-0028 records final owner intent as `Needs verification`.
 - [x] Tambah CI workflow file.
   - Done criteria: `.github/workflows/ci.yml` wujud dan local CMake configure dengan flag CI lulus.
 - [ ] Verify first GitHub Actions CI run.

@@ -11,7 +11,7 @@
 - Verify first GitHub Actions CI run after `.github/workflows/ci.yml` is pushed. Needs verification.
 - Investigate GitHub Actions `startup_failure` runs that complete before any job or log is created. Needs verification.
 - Decide coding style and formatter. Needs verification.
-- Confirm that the existing GitHub repository `LICENSE` GPL-3.0 is the intended license for Rimau Web Server. Needs verification.
+- Get project-owner confirmation that the existing GitHub repository `LICENSE` GPL-3.0 is the intended final license for Rimau Web Server. Needs verification.
 
 ## P1 - HTTP/1.1 Completion
 

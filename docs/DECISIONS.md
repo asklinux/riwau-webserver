@@ -724,3 +724,24 @@ Rimau now stores all runtime configuration in SQLite. Without schema metadata, f
 Consequence:
 
 The current migration system records version history and prevents accidental downgrade reads, but it is not yet a full multi-step migration framework. Future schema changes still need explicit migration functions, downgrade policy, backup/restore guidance, and production ownership rules. Needs verification.
+
+## ADR-0028: GPL-3.0 License Status Needs Owner Verification
+
+- Date: 2026-07-20
+- Status: Needs verification
+
+Observation:
+
+The repository contains a root `LICENSE` file with GNU General Public License version 3 text. This file was present in the target GitHub repository and is preserved in the local workspace.
+
+Decision:
+
+No final project-license decision is recorded by the project owner in this workspace beyond the existing `LICENSE` file.
+
+Reason:
+
+Licensing is a project ownership decision, not an implementation inference. The presence of a GPL-3.0 license file is strong repository evidence, but the project owner has not explicitly confirmed in these docs that GPL-3.0 is the intended final license for Rimau Web Server.
+
+Consequence:
+
+Treat GPL-3.0 as the current repository license marker when preserving files and planning bundled dependencies, but keep the final license intent marked `Needs verification` until the project owner confirms it.

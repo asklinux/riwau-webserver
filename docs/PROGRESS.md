@@ -1134,3 +1134,9 @@ Result:
 - `rimau_config_database` passed.
 - Default and `data/rimau.sqlite3` config checks passed.
 - Default and `data/rimau.sqlite3` protocol status checks passed.
+
+License status documentation update:
+
+- Verified that the root `LICENSE` file contains GNU GPL version 3 text.
+- Added ADR-0028 with status `Needs verification` because the repository file exists, but the project owner has not explicitly confirmed GPL-3.0 as the intended final Rimau Web Server license in project docs.
+- Marked the license checklist item complete because the status is now documented as required by `docs/plans/021-ordered-update-checklist.md`.

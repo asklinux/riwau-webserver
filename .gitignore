@@ -1,4 +1,5 @@
 build/
+build-ci/
 Testing/
 data/
 certs/

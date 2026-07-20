@@ -65,6 +65,7 @@ Planned:
 - HTTP/3 live UDP/QUIC serving, TLS 1.3 QUIC handshake, QPACK, and stream/session lifecycle. Candidate: `ngtcp2` + `nghttp3` atau `quiche`. Needs verification.
 - ALPN `h3` selepas HTTP/3 live serving siap dan diuji. Needs verification.
 - Bundled PHP, Python, Perl, atau runtime server-side lain. Needs verification.
+- First GitHub Actions CI run for `.github/workflows/ci.yml`. Needs verification.
 - Benchmark dan kemungkinan upgrade kepada `io_uring` atau event abstraction sendiri. Needs verification.
 
 Not present:
@@ -72,12 +73,14 @@ Not present:
 - ORM
 - Web framework
 - Container/deployment manifest
-- CI pipeline
 
 ## Repository Structure
 
 ```text
 .
+|-- .github/
+|   `-- workflows/
+|       `-- ci.yml
 |-- AGENTS.md
 |-- CMakeLists.txt
 |-- LICENSE
@@ -310,7 +313,7 @@ cmake --build build
 
 License file exists as GPL-3.0 from the target GitHub repository. Needs verification that GPL-3.0 is the intended project license.
 
-GitHub remote: `https://github.com/asklinux/riwau-webserver`. Current source was pushed to remote `main` on 2026-07-20. The local working directory used by Codex at `/home/data/tunnelbiz/rimauwebserver` still was not initialized as a Git repository at that time; future sessions should either initialize it carefully against the remote or work from a fresh clone. Needs verification.
+GitHub remote: `https://github.com/asklinux/riwau-webserver`. Current source was pushed to remote `main` on 2026-07-20. The local working directory `/home/data/tunnelbiz/rimauwebserver` is now initialized as a Git repository on branch `main` with `origin` pointing to the GitHub remote.
 
 Production deployment, service manager, packaging, container, TLS certificate handling, log rotation, dan privilege dropping: Needs verification.
 
@@ -370,6 +373,7 @@ Production deployment, service manager, packaging, container, TLS certificate ha
 - Worker pool berasaskan CPU core melalui `std::jthread`.
 - `SO_REUSEADDR`, `SO_REUSEPORT`, TCP keepalive, graceful SIGTERM/SIGINT shutdown, dan SIGHUP live reload terhad.
 - Fully static Linux x86_64 `rimau-server` build menggunakan bundled source glibc sysroot.
+- GitHub Actions workflow `.github/workflows/ci.yml` for fast Linux build/test with bundled OpenSSL, SQLite, and zlib; bundled glibc is disabled in CI fast path to avoid long PR feedback cycles.
 
 ## Current Implementation Status
 

@@ -1071,3 +1071,30 @@ Result:
 - Manual WAF smoke returned `403 Forbidden` with `x-rimau-waf-rule-id: 930100` for path traversal.
 - Manual WAF smoke returned `403 Forbidden` with `x-rimau-waf-rule-id: 913100` for scanner user-agent.
 - A broad SQLi pattern initially caused a false positive on `Accept: */*`; the pattern was removed and a regression test for a normal curl-style request was added.
+
+Ordered update checklist documentation:
+
+- Added `docs/plans/021-ordered-update-checklist.md`.
+- The checklist orders remaining work into phases: repo/automation, HTTP/1.1, security/WAF, TLS, HTTP/2, reverse proxy, HTTP/3, server-side runtimes, observability/admin, deployment, and performance.
+- `docs/TODO.md` now points future work to the checklist for one-by-one updates.
+- No code changes were made for this checklist update.
+
+Workspace Git alignment update:
+
+- Initialized `/home/data/tunnelbiz/rimauwebserver` as a Git repository.
+- Added remote `origin` pointing to `https://github.com/asklinux/riwau-webserver.git`.
+- Fetched `origin/main` at commit `a1b57618293676d60a377637690c1918b2b5e497`.
+- Set local branch `main` to track the remote source state without deleting the existing working tree.
+- `git status --short --branch` now works from the workspace.
+- `docs/plans/021-ordered-update-checklist.md` Phase 0 first item is now checked.
+
+CI workflow update:
+
+- Added `.github/workflows/ci.yml`.
+- `docs/plans/021-ordered-update-checklist.md` now marks the CI workflow file item as complete, while keeping the first remote GitHub Actions run as pending verification.
+- CI triggers on push to `main` and on pull requests.
+- The workflow installs build tools on `ubuntu-24.04`, configures CMake with `RIMAU_ENABLE_TESTS=ON`, `RIMAU_FULLY_STATIC_SERVER=OFF`, and `RIMAU_USE_BUNDLED_GLIBC=OFF`, then builds with Ninja.
+- CI keeps bundled OpenSSL, SQLite, and zlib enabled, so tests still exercise the required bundled dependency path for those libraries.
+- CI runs `ctest --test-dir build-ci --output-on-failure`, `rimau-server --check-config`, `rimau-server --protocols`, and `rimau-waf-tests`.
+- Bundled glibc full static deployment checks remain a separate checklist item because building glibc from source is too heavy for fast PR feedback.
+- First remote GitHub Actions run after push is still pending. Needs verification.

@@ -5,6 +5,7 @@
 #include <filesystem>
 #include <string>
 #include <string_view>
+#include <vector>
 
 namespace rimau::http {
 
@@ -22,8 +23,11 @@ struct Response {
 
     std::string to_http_string(bool include_body = true) const;
     std::string to_http_string(bool include_body, const SerializationOptions& options) const;
+    std::string to_http_chunked_string(const std::vector<std::string>& chunks, bool include_body = true) const;
+    std::string to_http_chunked_string(const std::vector<std::string>& chunks, bool include_body, const SerializationOptions& options) const;
 };
 
+std::string encode_chunked_body(const std::vector<std::string>& chunks);
 std::string reason_phrase(int status);
 Response text_response(int status, std::string body, std::string content_type = "text/plain; charset=utf-8");
 Response json_response(int status, std::string json_body);

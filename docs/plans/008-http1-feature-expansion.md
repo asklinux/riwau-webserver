@@ -62,4 +62,4 @@ Manual smoke tests used a temporary SQLite database and covered:
 
 ## Follow-Up Work
 
-See `docs/TODO.md` for current next work. The largest HTTP/1.1 follow-ups are handler-level streaming request bodies beyond the current file-backed body spooling step, response chunking, multipart ranges, Brotli, advanced slow-client protection, richer WebSocket routing, zero-copy static file serving, and broader integration/stress tests.
+See `docs/TODO.md` for current next work. The largest HTTP/1.1 follow-ups are handler-level streaming request bodies beyond the current file-backed body spooling step, producer-side async response streaming/backpressure beyond current basic chunked response serialization, multipart ranges, Brotli, advanced slow-client protection, richer WebSocket routing, zero-copy static file serving, and broader integration/stress tests.

@@ -4,6 +4,7 @@
 #include "rimau/http/response_sink.hpp"
 
 #include <string>
+#include <vector>
 
 namespace rimau::http {
 
@@ -19,6 +20,7 @@ public:
 
     void send();
     void send_without_body();
+    void send_chunked(std::vector<std::string> chunks);
 
 private:
     ResponseSink& downstream_;

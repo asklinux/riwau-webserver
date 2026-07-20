@@ -36,6 +36,7 @@ Implemented:
 - Content-Length request body parsing.
 - Chunked request body decoding.
 - HTTP/1.1 file-backed request body spooling for large Content-Length and chunked bodies before handler dispatch.
+- Basic HTTP/1.1 chunked response API and serialization through `ResponseSink::send_chunked`, `ResponseBuilder::send_chunked`, and `Response::to_http_chunked_string`.
 - URL decoding and query parameter parsing.
 - JSON request detection and JSON scaffold responses for methods with bodies.
 - Single-range static file responses.
@@ -103,7 +104,7 @@ Partial:
 - Logging hanya ke stderr.
 - Path traversal protection asas.
 - MIME detection by common file extension.
-- HTTP/1.1 support is partial; file-backed large-body spooling exists, but handler-level streaming request body API, response chunking, multipart ranges, Brotli, full WebSocket application routing, and broad stress validation are not implemented.
+- HTTP/1.1 support is partial; file-backed large-body spooling and basic chunked response API exist, but handler-level streaming request body API, producer-side async response backpressure, multipart ranges, Brotli, full WebSocket application routing, and broad stress validation are not implemented.
 - Proxygen-inspired pipeline is partial; filter chain, async handler body streaming, and full protocol session adapters are not implemented.
 - SQLite config is partial; schema version table exists, but multi-step migration framework, admin UI, and config backup policy are not implemented. SIGHUP live reload is implemented only for restart-free dynamic values.
 - TLS is partial; production certificate lifecycle and OCSP are not implemented. HTTP/2 ALPN `h2` request serving exists only as a partial basic path, not production-complete HTTP/2.
@@ -138,7 +139,7 @@ Semasa pemeriksaan awal pada 2026-07-18:
 | --- | --- | --- |
 | Build system | Implemented | CMake with bundled static OpenSSL, SQLite, zlib, Bison, Linux UAPI headers, and glibc targets; `rimau-server` is fully static in current Linux x86_64 validation. |
 | CLI | Partial | `--database`, `--set`, `--check-config`, `--protocols`, `--version`, `--help`. |
-| HTTP/1.1 | Partial | GET/HEAD static, POST/PUT/PATCH/DELETE JSON scaffold, OPTIONS, Content-Length, chunked decode, file-backed large-body spooling, keep-alive, basic pipelining, range, gzip, WebSocket echo, WebSocket reverse proxy tunnel, and extracted testable request framing. |
+| HTTP/1.1 | Partial | GET/HEAD static, POST/PUT/PATCH/DELETE JSON scaffold, OPTIONS, Content-Length, chunked decode, file-backed large-body spooling, basic chunked response API, keep-alive, basic pipelining, range, gzip, WebSocket echo, WebSocket reverse proxy tunnel, and extracted testable request framing. |
 | HTTP/2 | Partial | Frame codec, SETTINGS/PING basics, HPACK baseline, cleartext h2c and TLS ALPN `h2` HEADERS/DATA request serving through the shared handler pipeline exist; no production flow control, CONTINUATION assembly, HPACK Huffman, or dynamic-table persistence yet. |
 | HTTP/3 | Partial | QUIC varint, frame codec, and SETTINGS codec exist; no UDP/QUIC/QPACK/live serving yet. |
 | TLS | Partial | HTTP/1.1 HTTPS and partial HTTP/2 ALPN `h2` via bundled static OpenSSL 4.0.1 with TLS 1.2/1.3, SNI validation, multi-certificate SNI selection, ALPN `http/1.1`/`h2`, safe cipher config, and SIGHUP context reload for new connections. |
@@ -1316,3 +1317,37 @@ GitHub Actions CI verification:
 - GitHub Actions run `29717795357` for commit `d978384` passed on 2026-07-20.
 - This verifies the pushed workflow can configure, build, run CTest, and run CLI smoke in the repository's Ubuntu 22.04 fast path.
 - Marked the first CI verification item complete in `docs/plans/021-ordered-update-checklist.md`.
+
+HTTP/1.1 response chunking update:
+
+- Added `ResponseSink::send_chunked` as the handler-facing API for chunked responses.
+- Added `ResponseBuilder::send_chunked` helper for handlers.
+- Added `Response::to_http_chunked_string` and `encode_chunked_body`.
+- HTTP/1.1 `BufferedResponseSink` now serializes chunked handler responses with `Transfer-Encoding: chunked` and no `Content-Length`.
+- Added response serializer coverage for chunked encoding.
+- Added handler pipeline coverage proving a handler can send chunked response chunks through `ResponseBuilder`.
+- Marked the Phase 1 response chunking checklist item complete in `docs/plans/021-ordered-update-checklist.md`.
+
+Known limits from this update:
+
+- This is basic HTTP/1.1 chunked response serialization, not a full producer-side async streaming writer.
+- The current server still serializes the chunked response into `response_buffer_` before socket write.
+- Response producer backpressure and reverse proxy request/response streaming remain pending.
+
+Validation on 2026-07-20 after HTTP/1.1 response chunking update:
+
+```bash
+cmake -S . -B build
+cmake --build build
+ctest --test-dir build --output-on-failure -R 'rimau_http_response|rimau_handler_pipeline|rimau_http1_network|rimau_protocol_capabilities'
+./build/rimau-server --protocols
+ctest --test-dir build --output-on-failure
+```
+
+Result:
+
+- CMake configure passed.
+- Build passed; static glibc DNS/NSS linker warnings for `getaddrinfo`/OpenSSL `gethostbyname` remain.
+- Targeted response/handler/HTTP1 tests passed, 4/4 tests.
+- `./build/rimau-server --protocols` passed and reports HTTP/1.1 basic chunked response serialization.
+- Full CTest passed, 12/12 tests.

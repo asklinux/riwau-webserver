@@ -773,4 +773,29 @@ Rimau needs to stop requiring large uploads to live entirely in `Request::body` 
 
 Consequence:
 
-This does not complete streaming request body support. Handler dispatch still waits for the full request body. Normal HTTP reverse proxy forwarding still reads the spooled body into memory before sending upstream. A future design must add handler-visible body streams, response chunking, reverse proxy request/response streaming, and explicit backpressure semantics.
+This does not complete streaming request body support. Handler dispatch still waits for the full request body. Normal HTTP reverse proxy forwarding still reads the spooled body into memory before sending upstream. A future design must add handler-visible body streams, reverse proxy request/response streaming, producer-side async response backpressure, and explicit backpressure semantics.
+
+## ADR-0030: Add Basic HTTP/1.1 Chunked Response API
+
+- Date: 2026-07-20
+- Status: Accepted
+
+Decision:
+
+Add a basic handler-facing chunked response API for HTTP/1.1. Handlers can send response chunks without knowing `Content-Length` up front through `ResponseSink::send_chunked` or `ResponseBuilder::send_chunked`.
+
+Implementation:
+
+- Add `ResponseSink::send_chunked` with a default fallback that concatenates chunks for sinks that do not override it.
+- Add `ResponseBuilder::send_chunked`.
+- Add `Response::to_http_chunked_string` and `encode_chunked_body`.
+- Update the HTTP/1.1 `BufferedResponseSink` to serialize chunked responses with `Transfer-Encoding: chunked` and without `Content-Length`.
+- Keep HTTP/2 handling compatible by retaining the concatenated response body in the captured response object.
+
+Reason:
+
+P1 requires handlers to be able to send a response without a known `Content-Length`. HTTP/1.1 chunked transfer encoding is the compatible baseline for that behavior and fits the current request handler pipeline.
+
+Consequence:
+
+This is not a full asynchronous response producer model. The current implementation still serializes chunked output into the connection response buffer before socket write. Producer-side async chunk generation, response backpressure, and reverse proxy response streaming remain pending.

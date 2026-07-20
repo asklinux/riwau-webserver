@@ -519,8 +519,8 @@ Rimau does not vendor or copy Proxygen. The local implementation uses small proj
 - `RequestHandler`: handles one HTTP request.
 - `RequestHandlerFactory`: creates a handler for a request.
 - `Transaction`: owns one request-response lifecycle and dispatches to a handler.
-- `ResponseSink`: downstream interface used by handlers to send a response.
-- `ResponseBuilder`: helper for constructing response objects before sending.
+- `ResponseSink`: downstream interface used by handlers to send normal or chunked responses.
+- `ResponseBuilder`: helper for constructing normal or chunked response objects before sending.
 
 Current HTTP/1.1 connection flow:
 
@@ -534,7 +534,7 @@ Linux epoll reactor worker
   -> built-in WAF inspection when enabled
   -> create Transaction
   -> VirtualHostHandlerFactory selects static, reverse proxy, script-placeholder, or fallback static handler
-  -> handler sends Response through buffered ResponseSink
+  -> handler sends normal Response or chunked Response through buffered ResponseSink
   -> non-blocking response write
 ```
 
@@ -567,6 +567,7 @@ Current:
 - Single-range static file responses with `206 Partial Content` and `Content-Range`.
 - MIME type detection for common text, image, video, wasm, and pdf extensions.
 - Gzip static response compression through bundled static zlib 1.3.2 when requested by the client.
+- Basic chunked response API through `ResponseSink::send_chunked`, `ResponseBuilder::send_chunked`, and `Response::to_http_chunked_string`; HTTP/1.1 serialization emits `Transfer-Encoding: chunked` and omits `Content-Length`.
 - Basic WebSocket upgrade and two-way echo.
 - WebSocket reverse proxy tunnel for reverse proxy virtual hosts with `http://` or `https://` upstreams.
 - Request-smuggling protection for duplicate/invalid `Content-Length`, `Content-Length` plus `Transfer-Encoding`, duplicate/unsupported `Transfer-Encoding`, obs-fold, and bare CR/LF.
@@ -610,6 +611,7 @@ Current:
 Missing:
 
 - Handler-level streaming request body API and full backpressure contract. Current code accumulates large HTTP/1.1 bodies into temporary files before dispatch, but handlers still receive the request only after the body is complete.
+- Producer-side async response streaming/backpressure. Current basic chunked responses are chunk-encoded before socket write rather than produced incrementally by the event loop.
 - Multipart byte ranges.
 - Brotli compression.
 - Full WebSocket fragmentation/extensions/subprotocol support.

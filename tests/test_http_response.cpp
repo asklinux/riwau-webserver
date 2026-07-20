@@ -6,6 +6,7 @@
 #include <iostream>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace {
 
@@ -55,6 +56,21 @@ int main()
         assert(raw.find("server:") == std::string::npos);
         assert(raw.find("x-content-type-options: nosniff\r\n") != std::string::npos);
         assert(raw.find("x-test: safe  Injected: bad\r\n") != std::string::npos);
+    }
+
+    {
+        auto response = rimau::http::text_response(200, "");
+        response.headers["content-length"] = "999";
+
+        const std::vector<std::string> chunks { "hello", " ", "rimau" };
+        const std::string encoded = rimau::http::encode_chunked_body(chunks);
+        assert(encoded == "5\r\nhello\r\n1\r\n \r\n5\r\nrimau\r\n0\r\n\r\n");
+
+        const std::string raw = response.to_http_chunked_string(chunks);
+        assert(raw.find("HTTP/1.1 200 OK\r\n") != std::string::npos);
+        assert(raw.find("transfer-encoding: chunked\r\n") != std::string::npos);
+        assert(raw.find("content-length:") == std::string::npos);
+        assert(raw.ends_with(encoded));
     }
 
     const auto root = std::filesystem::temp_directory_path() / "rimau-http-response-test";

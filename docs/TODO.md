@@ -6,8 +6,6 @@
 - Add parser tests for malformed request lines, duplicate headers, long headers, and path traversal cases.
 - Add response tests for GET, HEAD, 404, 403, 405, and MIME types.
 - Add multi-step SQLite migration framework, downgrade policy, and backup/restore workflow beyond current schema version table.
-- Verify first GitHub Actions CI run after `.github/workflows/ci.yml` is pushed. Needs verification.
-- Investigate GitHub Actions `startup_failure` runs that complete before any job or log is created. Needs verification.
 - Decide coding style and formatter. Needs verification.
 - Get project-owner confirmation that the existing GitHub repository `LICENSE` GPL-3.0 is the intended final license for Rimau Web Server. Needs verification.
 
@@ -17,7 +15,7 @@
 - Add integration tests for virtual host routing, fallback host behavior, reverse proxy success/failure, WebSocket proxy HTTP/HTTPS upstream behavior, and script-placeholder 501 behavior.
 - Complete handler-level streaming request body API with backpressure for large uploads; current HTTP/1.1 code only provides file-backed body spooling before handler dispatch.
 - Expose chunked trailers to handlers or explicitly discard them through a documented policy.
-- Add response chunking.
+- Add producer-side async response streaming/backpressure beyond current basic chunked response serialization.
 - Add multipart range responses and `If-Range` handling for static files.
 - Add Brotli compression if the dependency and deployment approach are accepted. Needs verification.
 - Add WebSocket application routing, fragmentation support, subprotocol negotiation, extension policy, frame-aware proxy limits, and backpressure policy.

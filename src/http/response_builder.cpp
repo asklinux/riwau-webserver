@@ -51,4 +51,9 @@ void ResponseBuilder::send_without_body()
     downstream_.send(std::move(response_), BodyMode::headers_only);
 }
 
+void ResponseBuilder::send_chunked(std::vector<std::string> chunks)
+{
+    downstream_.send_chunked(std::move(response_), std::move(chunks), BodyMode::include);
+}
+
 } // namespace rimau::http

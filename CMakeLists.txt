@@ -281,6 +281,7 @@ add_library(rimau_core
     src/http/parser.cpp
     src/http/response_builder.cpp
     src/http/response.cpp
+    src/http/response_sink.cpp
     src/http/static_file_handler.cpp
     src/http/transaction.cpp
     src/http/virtual_host.cpp

@@ -41,8 +41,9 @@ Untuk setiap item:
 - [ ] Implement streaming request body dengan backpressure.
   - Done criteria: large upload tidak perlu buffer seluruh body dalam memori.
   - Status: Partial; HTTP/1.1 body besar kini discroll ke fail sementara selepas header lengkap, tetapi handler-level streaming API, reverse proxy request streaming, dan backpressure contract penuh belum siap.
-- [ ] Implement response chunking.
+- [x] Implement response chunking.
   - Done criteria: handler boleh hantar response streaming tanpa `Content-Length` awal.
+  - Status: Basic HTTP/1.1 chunked response API/serialization implemented through `ResponseSink::send_chunked`; producer-side async streaming/backpressure remains future work.
 - [ ] Implement multipart range dan `If-Range`.
   - Done criteria: static file video/large file support lebih lengkap.
 - [ ] Decide dan implement Brotli jika dependency/bundling diterima.

@@ -988,6 +988,26 @@ public:
         last_status_ = response.status;
         response_ = std::move(response);
         body_mode_ = body_mode;
+        chunked_ = false;
+        chunks_.clear();
+        sent_ = true;
+    }
+
+    void send_chunked(rimau::http::Response response, std::vector<std::string> chunks, rimau::http::BodyMode body_mode = rimau::http::BodyMode::include) override
+    {
+        if (sent_) {
+            return;
+        }
+
+        last_status_ = response.status;
+        response_ = std::move(response);
+        response_.body.clear();
+        for (const auto& chunk : chunks) {
+            response_.body += chunk;
+        }
+        chunks_ = std::move(chunks);
+        body_mode_ = body_mode;
+        chunked_ = true;
         sent_ = true;
     }
 
@@ -1005,6 +1025,12 @@ public:
         } else {
             response.headers["connection"] = "close";
             response.headers.erase("keep-alive");
+        }
+        if (chunked_) {
+            return response.to_http_chunked_string(
+                chunks_,
+                body_mode_ == rimau::http::BodyMode::include,
+                response_serialization_options(config));
         }
         return response.to_http_string(body_mode_ == rimau::http::BodyMode::include, response_serialization_options(config));
     }
@@ -1028,6 +1054,8 @@ private:
     bool sent_ = false;
     int last_status_ = 500;
     rimau::http::Response response_;
+    bool chunked_ = false;
+    std::vector<std::string> chunks_;
     rimau::http::BodyMode body_mode_ = rimau::http::BodyMode::include;
 };
 

@@ -20,7 +20,7 @@ std::vector<ProtocolCapability> protocol_capabilities(const rimau::core::ServerC
             true,
             config.http1_enabled,
             http1_transport,
-            "HTTP/1.1 supports GET/HEAD static files, OPTIONS, POST/PUT/PATCH/DELETE JSON scaffold, Content-Length, chunked decode, file-backed large-body spooling, keep-alive, basic pipelining, single range, gzip, basic WebSocket echo, WebSocket reverse proxy tunneling, and baseline timeout/rate-limit/security controls."
+            "HTTP/1.1 supports GET/HEAD static files, OPTIONS, POST/PUT/PATCH/DELETE JSON scaffold, Content-Length, chunked decode, file-backed large-body spooling, basic chunked response serialization, keep-alive, basic pipelining, single range, gzip, basic WebSocket echo, WebSocket reverse proxy tunneling, and baseline timeout/rate-limit/security controls."
         },
         {
             ProtocolVersion::http_2,

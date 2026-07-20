@@ -4,6 +4,7 @@
 #include <cctype>
 #include <cstdlib>
 #include <fstream>
+#include <iomanip>
 #include <limits>
 #include <sstream>
 #include <system_error>
@@ -411,6 +412,44 @@ std::string Response::to_http_string(bool include_body, const SerializationOptio
         output << body;
     }
 
+    return output.str();
+}
+
+std::string Response::to_http_chunked_string(const std::vector<std::string>& chunks, bool include_body) const
+{
+    return to_http_chunked_string(chunks, include_body, SerializationOptions {});
+}
+
+std::string Response::to_http_chunked_string(
+    const std::vector<std::string>& chunks,
+    bool include_body,
+    const SerializationOptions& options) const
+{
+    Response response = *this;
+    if (include_body && response.status >= 200 && response.status != 204 && response.status != 304 && response.status != 101) {
+        response.headers.erase("content-length");
+        response.headers["transfer-encoding"] = "chunked";
+        response.body = encode_chunked_body(chunks);
+        return response.to_http_string(true, options);
+    }
+
+    response.headers.erase("transfer-encoding");
+    response.body.clear();
+    return response.to_http_string(false, options);
+}
+
+std::string encode_chunked_body(const std::vector<std::string>& chunks)
+{
+    std::ostringstream output;
+    output << std::hex << std::nouppercase;
+    for (const auto& chunk : chunks) {
+        if (chunk.empty()) {
+            continue;
+        }
+        output << chunk.size() << "\r\n";
+        output << chunk << "\r\n";
+    }
+    output << "0\r\n\r\n";
     return output.str();
 }
 

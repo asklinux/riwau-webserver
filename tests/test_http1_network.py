@@ -81,6 +81,22 @@ def http_request(port: int, request: bytes):
         connection.close()
 
 
+def assert_rejected_request(port: int, name: str, request: bytes, expected_status: int = 400) -> None:
+    connection = HttpConnection(port)
+    try:
+        connection.send(request)
+        status, _, headers, body = connection.read_response()
+        assert status == expected_status, (name, status, headers, body[:200])
+        assert headers.get("connection", "").lower() == "close", (name, headers)
+        assert body, (name, body)
+
+        connection.sock.settimeout(1)
+        trailing = connection.sock.recv(4096)
+        assert b"HTTP/1.1 200 OK" not in trailing, (name, trailing)
+    finally:
+        connection.close()
+
+
 def websocket_accept(key: str) -> str:
     guid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
     digest = hashlib.sha1((key + guid).encode("ascii")).digest()
@@ -390,6 +406,80 @@ def test_directory_index_and_error_page(port: int) -> None:
     assert body == b"Rimau custom error\n", body
 
 
+def test_request_smuggling_rejections(port: int) -> None:
+    smuggled = b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n"
+    cases = [
+        (
+            "duplicate content-length",
+            b"POST /bad HTTP/1.1\r\n"
+            b"Host: localhost\r\n"
+            b"Content-Length: 1\r\n"
+            b"Content-Length: 1\r\n"
+            b"Connection: keep-alive\r\n"
+            b"\r\n"
+            b"x"
+            + smuggled,
+        ),
+        (
+            "invalid content-length",
+            b"POST /bad HTTP/1.1\r\n"
+            b"Host: localhost\r\n"
+            b"Content-Length: nope\r\n"
+            b"Connection: keep-alive\r\n"
+            b"\r\n"
+            + smuggled,
+        ),
+        (
+            "transfer-encoding content-length conflict",
+            b"POST /bad HTTP/1.1\r\n"
+            b"Host: localhost\r\n"
+            b"Content-Length: 4\r\n"
+            b"Transfer-Encoding: chunked\r\n"
+            b"Connection: keep-alive\r\n"
+            b"\r\n"
+            b"0\r\n\r\n"
+            + smuggled,
+        ),
+        (
+            "unsupported transfer-encoding",
+            b"POST /bad HTTP/1.1\r\n"
+            b"Host: localhost\r\n"
+            b"Transfer-Encoding: gzip\r\n"
+            b"Connection: keep-alive\r\n"
+            b"\r\n"
+            + smuggled,
+        ),
+        (
+            "obs-fold header",
+            b"GET /bad HTTP/1.1\r\n"
+            b"Host: localhost\r\n"
+            b" X-Injected: yes\r\n"
+            b"Connection: keep-alive\r\n"
+            b"\r\n"
+            + smuggled,
+        ),
+        (
+            "bare line feed",
+            b"GET /bad HTTP/1.1\n"
+            b"Host: localhost\r\n"
+            b"Connection: keep-alive\r\n"
+            b"\r\n"
+            + smuggled,
+        ),
+        (
+            "bare carriage return",
+            b"GET /bad HTTP/1.1\r\n"
+            b"Host: localhost\rBad: yes\r\n"
+            b"Connection: keep-alive\r\n"
+            b"\r\n"
+            + smuggled,
+        ),
+    ]
+
+    for name, request in cases:
+        assert_rejected_request(port, name, request)
+
+
 def test_websocket_echo(port: int) -> None:
     sock = websocket_handshake(port, "localhost")
     try:
@@ -431,6 +521,7 @@ def main() -> int:
         test_large_file_backed_body(server.port)
         test_range_and_gzip(server.port)
         test_directory_index_and_error_page(server.port)
+        test_request_smuggling_rejections(server.port)
         test_websocket_echo(server.port)
         test_websocket_proxy(server.port, upstream)
 

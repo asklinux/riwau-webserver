@@ -90,7 +90,7 @@ Implemented:
 - Proxygen-inspired request handler pipeline.
 - `RequestHandler`, `RequestHandlerFactory`, `Transaction`, `ResponseSink`, `ResponseBuilder`, and `StaticFileHandler`.
 - Static document root `public/`.
-- HTTP/1.1 network integration CTest for keep-alive, max request cap, idle timeout, pipelining, chunked body, range, gzip, WebSocket echo, and WebSocket proxy.
+- HTTP/1.1 network integration CTest for keep-alive, max request cap, idle timeout, pipelining, chunked body, request-smuggling rejection, range, gzip, WebSocket echo, and WebSocket proxy.
 - Parser unit test melalui CTest.
 - Handler pipeline unit test melalui CTest.
 - Response serializer unit test melalui CTest.
@@ -152,7 +152,7 @@ Semasa pemeriksaan awal pada 2026-07-18:
 | Request pipeline | Partial | Handler/factory/transaction/response sink implemented for static, vhost, reverse proxy, and script-placeholder HTTP/1.1. |
 | Config | Partial | SQLite table `rimau_config`, schema metadata table `rimau_schema_migrations`, protocol, TLS, keep-alive, static file, timeout, rate-limit, IP-list, security-header, virtual-host/proxy keys, and limited SIGHUP reload behavior. |
 | Security | Partial | Baseline HTTP framing hardening, timeout, rate limit, connection limit, built-in ModSecurity-compatible WAF subset, configurable security header values, and IPv4/IPv6 IP allow/block list are implemented; fuzzing, full ModSecurity/CRS integration, and production hardening remain pending. |
-| Tests | Partial | Parser, HTTP/1.1 session/framing, HTTP/1.1 network integration, response serializer, handler pipeline, SQLite config, CLI config, protocol capability, HTTP/2 wire, HTTP/3 wire, virtual host, and WAF tests. |
+| Tests | Partial | Parser, HTTP/1.1 session/framing, HTTP/1.1 network integration including request-smuggling rejection, response serializer, handler pipeline, SQLite config, CLI config, protocol capability, HTTP/2 wire, HTTP/3 wire, virtual host, and WAF tests. |
 | Deployment | Planned | No production deployment files. |
 | Database | Partial | SQLite is used for runtime configuration only; the SQLite engine is bundled static and config schema version `1` is recorded. |
 | I/O model | Partial | Linux `epoll` reactor with per-worker event loops and SO_REUSEPORT implemented; benchmarks still pending. |
@@ -1388,4 +1388,23 @@ Result:
 - Initial targeted parser/response/config/vhost/HTTP1 network tests passed, 5/5 tests.
 - Targeted parser/response/config/vhost/HTTP1 network/protocol capability tests passed, 6/6 tests.
 - `./build/rimau-server --protocols` passed and reports handler pull reads, single/multipart range with `If-Range`, and configurable directory index/error page in HTTP/1.1.
+- Full CTest passed, 12/12 tests.
+
+Phase 2 request-smuggling integration test update:
+
+- Added HTTP/1.1 network integration coverage for request-smuggling rejection cases.
+- Tested duplicate `Content-Length`, invalid `Content-Length`, `Content-Length` plus `Transfer-Encoding`, unsupported `Transfer-Encoding`, obs-fold, bare LF, and bare CR.
+- Each case appends a valid smuggled `GET /` request after the malformed request and asserts the server returns an error with `Connection: close` without returning a smuggled `200 OK`.
+- Marked the Phase 2 request-smuggling integration checklist item complete in `docs/plans/021-ordered-update-checklist.md`.
+
+Validation on 2026-07-20 after request-smuggling integration test update:
+
+```bash
+ctest --test-dir build --output-on-failure -R rimau_http1_network
+ctest --test-dir build --output-on-failure
+```
+
+Result:
+
+- HTTP/1.1 network integration test passed, 1/1 test.
 - Full CTest passed, 12/12 tests.

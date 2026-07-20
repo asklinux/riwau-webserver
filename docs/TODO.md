@@ -65,7 +65,6 @@
 - Add per-virtual-host WAF enable/disable, anomaly threshold, and rule exception controls if required. Needs verification.
 - Add structured WAF audit log format and persistence policy. Needs verification.
 - Add ModSecurity rule syntax/parser support only if full compatibility is accepted. Needs verification.
-- Add CTest or integration harness for request smuggling cases.
 - Add CTest or integration harness for rate limiting and connection limiting.
 - Add CTest or integration harness for IPv6 listener and IPv6 allowlist/blocklist behavior.
 - Add support for arbitrary custom security header names if the fixed built-in set is not enough. Needs verification.

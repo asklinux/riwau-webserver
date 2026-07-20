@@ -56,8 +56,9 @@ Untuk setiap item:
 
 ## Phase 2: Security And WAF Hardening
 
-- [ ] Tambah integration tests request smuggling.
+- [x] Tambah integration tests request smuggling.
   - Done criteria: duplicate/invalid `Content-Length`, TE/CL conflict, obs-fold, bare CR/LF, dan unsupported TE diuji.
+  - Status: HTTP/1.1 network integration now rejects duplicate/invalid `Content-Length`, `Content-Length` plus `Transfer-Encoding`, unsupported `Transfer-Encoding`, obs-fold, bare LF, and bare CR while ensuring an appended smuggled request is not processed.
 - [ ] Tambah integration tests rate limit, connection limit, timeout, dan slow-client behavior.
   - Done criteria: behavior keselamatan runtime terbukti end-to-end.
 - [ ] Tambah WAF integration tests untuk HTTP/1.1, WebSocket upgrade, WebSocket proxy upgrade, dan partial HTTP/2.

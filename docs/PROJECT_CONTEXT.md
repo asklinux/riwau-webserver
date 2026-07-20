@@ -379,7 +379,7 @@ Production deployment, service manager, packaging, container, TLS certificate ha
 - Response serializer test asas melalui CTest.
 - Handler pipeline test asas melalui CTest.
 - HTTP/1.1 session/framing test melalui CTest tanpa socket event loop.
-- HTTP/1.1 network integration test melalui CTest untuk keep-alive, max request cap, request/header/body/idle timeout, pipelining, chunked body, request-smuggling rejection, rate limiting, connection limits, slow-client behavior, range, gzip, directory index, custom error page, WebSocket echo, dan WebSocket proxy.
+- HTTP/1.1 network integration test melalui CTest untuk keep-alive, max request cap, request/header/body/idle timeout, pipelining, chunked body, request-smuggling rejection, rate limiting, connection limits, slow-client behavior, WAF block paths untuk HTTP/1.1/WebSocket/WebSocket proxy/partial HTTP/2, range, gzip, directory index, custom error page, WebSocket echo, dan WebSocket proxy.
 - SQLite config database test asas melalui CTest.
 - CLI integration test melalui CTest untuk `--database`, `--set`, `--check-config`, dan `--protocols`.
 - Protocol capability test asas melalui CTest.

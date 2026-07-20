@@ -90,7 +90,7 @@ Implemented:
 - Proxygen-inspired request handler pipeline.
 - `RequestHandler`, `RequestHandlerFactory`, `Transaction`, `ResponseSink`, `ResponseBuilder`, and `StaticFileHandler`.
 - Static document root `public/`.
-- HTTP/1.1 network integration CTest for keep-alive, max request cap, idle timeout, pipelining, chunked body, request-smuggling rejection, range, gzip, WebSocket echo, and WebSocket proxy.
+- HTTP/1.1 network integration CTest for keep-alive, max request cap, idle timeout, pipelining, chunked body, request-smuggling rejection, rate limiting, connection limits, timeout/slow-client behavior, WAF block paths for HTTP/1.1/WebSocket/WebSocket proxy/partial HTTP/2, range, gzip, WebSocket echo, and WebSocket proxy.
 - Parser unit test melalui CTest.
 - Handler pipeline unit test melalui CTest.
 - Response serializer unit test melalui CTest.
@@ -152,7 +152,7 @@ Semasa pemeriksaan awal pada 2026-07-18:
 | Request pipeline | Partial | Handler/factory/transaction/response sink implemented for static, vhost, reverse proxy, and script-placeholder HTTP/1.1. |
 | Config | Partial | SQLite table `rimau_config`, schema metadata table `rimau_schema_migrations`, protocol, TLS, keep-alive, static file, timeout, rate-limit, IP-list, security-header, virtual-host/proxy keys, and limited SIGHUP reload behavior. |
 | Security | Partial | Baseline HTTP framing hardening, timeout, rate limit, connection limit, built-in ModSecurity-compatible WAF subset, configurable security header values, and IPv4/IPv6 IP allow/block list are implemented; fuzzing, full ModSecurity/CRS integration, and production hardening remain pending. |
-| Tests | Partial | Parser, HTTP/1.1 session/framing, HTTP/1.1 network integration including request-smuggling rejection, rate limiting, connection limits, and request/header/body/idle timeout slow-client behavior, response serializer, handler pipeline, SQLite config, CLI config, protocol capability, HTTP/2 wire, HTTP/3 wire, virtual host, and WAF tests. |
+| Tests | Partial | Parser, HTTP/1.1 session/framing, HTTP/1.1 network integration including request-smuggling rejection, rate limiting, connection limits, request/header/body/idle timeout slow-client behavior, and WAF block paths for HTTP/1.1/WebSocket/WebSocket proxy/partial HTTP/2, response serializer, handler pipeline, SQLite config, CLI config, protocol capability, HTTP/2 wire, HTTP/3 wire, virtual host, and WAF tests. |
 | Deployment | Planned | No production deployment files. |
 | Database | Partial | SQLite is used for runtime configuration only; the SQLite engine is bundled static and config schema version `1` is recorded. |
 | I/O model | Partial | Linux `epoll` reactor with per-worker event loops and SO_REUSEPORT implemented; benchmarks still pending. |
@@ -162,12 +162,14 @@ Semasa pemeriksaan awal pada 2026-07-18:
 Most recent completed on 2026-07-20:
 
 ```bash
+python3 -m py_compile tests/test_http1_network.py
 ctest --test-dir build --output-on-failure -R rimau_http1_network
 ctest --test-dir build --output-on-failure
 ```
 
 Result:
 
+- Python syntax check passed.
 - HTTP/1.1 network integration test passed, 1/1 test.
 - Full CTest passed, 12/12 tests.
 
@@ -1437,5 +1439,27 @@ ctest --test-dir build --output-on-failure
 
 Result:
 
+- HTTP/1.1 network integration test passed, 1/1 test.
+- Full CTest passed, 12/12 tests.
+
+Phase 2 WAF integration test update:
+
+- Added HTTP/1.1 network integration coverage for WAF blocking with `modsecurity_enabled=true`.
+- The WAF integration path now verifies path-traversal rule `930100` returns `403 Forbidden` with WAF headers before normal HTTP/1.1 handler dispatch.
+- Added WAF block coverage before local WebSocket upgrade and before WebSocket reverse proxy setup.
+- Added partial cleartext HTTP/2 h2c WAF block coverage by sending raw HTTP/2 preface, SETTINGS, and HEADERS frames and decoding the HTTP/2 response HEADERS/DATA.
+- Marked the Phase 2 WAF integration checklist item complete in `docs/plans/021-ordered-update-checklist.md`.
+
+Validation on 2026-07-20 after WAF integration test update:
+
+```bash
+python3 -m py_compile tests/test_http1_network.py
+ctest --test-dir build --output-on-failure -R rimau_http1_network
+ctest --test-dir build --output-on-failure
+```
+
+Result:
+
+- Python syntax check passed.
 - HTTP/1.1 network integration test passed, 1/1 test.
 - Full CTest passed, 12/12 tests.

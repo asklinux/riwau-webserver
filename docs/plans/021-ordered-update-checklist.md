@@ -62,8 +62,9 @@ Untuk setiap item:
 - [x] Tambah integration tests rate limit, connection limit, timeout, dan slow-client behavior.
   - Done criteria: behavior keselamatan runtime terbukti end-to-end.
   - Status: HTTP/1.1 network integration now covers fixed-window rate limiting, per-IP and global connection limit rejection, and request/header/body/idle timeout slow-client behavior using SQLite-configured limits.
-- [ ] Tambah WAF integration tests untuk HTTP/1.1, WebSocket upgrade, WebSocket proxy upgrade, dan partial HTTP/2.
+- [x] Tambah WAF integration tests untuk HTTP/1.1, WebSocket upgrade, WebSocket proxy upgrade, dan partial HTTP/2.
   - Done criteria: WAF block path diuji di semua entry point.
+  - Status: HTTP/1.1 network integration now enables the built-in WAF and verifies blocking for normal HTTP/1.1, local WebSocket upgrade, WebSocket proxy vhost upgrade, and partial h2c request-serving paths.
 - [ ] Bina WAF false-positive regression corpus.
   - Done criteria: traffic normal browser/curl tidak diblock oleh rule default.
 - [ ] Decide full `libmodsecurity` + full OWASP CRS atau kekal Rimau-native WAF.

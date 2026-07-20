@@ -59,7 +59,6 @@
 
 - Decide whether to integrate full `libmodsecurity` as a bundled source dependency or keep Rimau-native WAF rules only. Needs verification.
 - If full OWASP Core Rule Set is bundled, pin the upstream source/version, license notes, update process, test corpus, and rule exclusion policy. Needs verification.
-- Add WAF integration tests for HTTP/1.1, WebSocket upgrade, WebSocket reverse proxy upgrade, and partial HTTP/2 request-serving paths.
 - Add WAF false-positive regression corpus for normal browser/curl traffic.
 - Add per-virtual-host WAF enable/disable, anomaly threshold, and rule exception controls if required. Needs verification.
 - Add structured WAF audit log format and persistence policy. Needs verification.

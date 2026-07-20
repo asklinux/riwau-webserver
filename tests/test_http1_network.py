@@ -14,6 +14,83 @@ import time
 from pathlib import Path
 
 
+HTTP2_PREFACE = b"PRI * HTTP/2.0\r\n\r\nSM\r\n\r\n"
+HTTP2_FRAME_DATA = 0x0
+HTTP2_FRAME_HEADERS = 0x1
+HTTP2_FRAME_SETTINGS = 0x4
+HTTP2_FLAG_END_STREAM = 0x1
+HTTP2_FLAG_ACK = 0x1
+HTTP2_FLAG_END_HEADERS = 0x4
+
+HPACK_STATIC_TABLE = [
+    (":authority", ""),
+    (":method", "GET"),
+    (":method", "POST"),
+    (":path", "/"),
+    (":path", "/index.html"),
+    (":scheme", "http"),
+    (":scheme", "https"),
+    (":status", "200"),
+    (":status", "204"),
+    (":status", "206"),
+    (":status", "304"),
+    (":status", "400"),
+    (":status", "404"),
+    (":status", "500"),
+    ("accept-charset", ""),
+    ("accept-encoding", "gzip, deflate"),
+    ("accept-language", ""),
+    ("accept-ranges", ""),
+    ("accept", ""),
+    ("access-control-allow-origin", ""),
+    ("age", ""),
+    ("allow", ""),
+    ("authorization", ""),
+    ("cache-control", ""),
+    ("content-disposition", ""),
+    ("content-encoding", ""),
+    ("content-language", ""),
+    ("content-length", ""),
+    ("content-location", ""),
+    ("content-range", ""),
+    ("content-type", ""),
+    ("cookie", ""),
+    ("date", ""),
+    ("etag", ""),
+    ("expect", ""),
+    ("expires", ""),
+    ("from", ""),
+    ("host", ""),
+    ("if-match", ""),
+    ("if-modified-since", ""),
+    ("if-none-match", ""),
+    ("if-range", ""),
+    ("if-unmodified-since", ""),
+    ("last-modified", ""),
+    ("link", ""),
+    ("location", ""),
+    ("max-forwards", ""),
+    ("proxy-authenticate", ""),
+    ("proxy-authorization", ""),
+    ("range", ""),
+    ("referer", ""),
+    ("refresh", ""),
+    ("retry-after", ""),
+    ("server", ""),
+    ("set-cookie", ""),
+    ("strict-transport-security", ""),
+    ("transfer-encoding", ""),
+    ("user-agent", ""),
+    ("vary", ""),
+    ("via", ""),
+    ("www-authenticate", ""),
+]
+HPACK_EXACT_INDEX = {entry: index + 1 for index, entry in enumerate(HPACK_STATIC_TABLE)}
+HPACK_NAME_INDEX = {}
+for index, (name, _) in enumerate(HPACK_STATIC_TABLE, start=1):
+    HPACK_NAME_INDEX.setdefault(name, index)
+
+
 def free_port() -> int:
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as sock:
         sock.bind(("127.0.0.1", 0))
@@ -173,12 +250,11 @@ def read_websocket_frame(sock: socket.socket):
     return opcode, payload
 
 
-def websocket_handshake(port: int, host: str):
-    key = base64.b64encode(os.urandom(16)).decode("ascii")
-    sock = socket.create_connection(("127.0.0.1", port), timeout=3)
-    sock.settimeout(3)
-    request = (
-        f"GET /ws HTTP/1.1\r\n"
+def websocket_upgrade_request(host: str, path: str = "/ws", key: str | None = None) -> bytes:
+    if key is None:
+        key = base64.b64encode(os.urandom(16)).decode("ascii")
+    return (
+        f"GET {path} HTTP/1.1\r\n"
         f"Host: {host}\r\n"
         "Upgrade: websocket\r\n"
         "Connection: Upgrade\r\n"
@@ -186,6 +262,13 @@ def websocket_handshake(port: int, host: str):
         "Sec-WebSocket-Version: 13\r\n"
         "\r\n"
     ).encode("ascii")
+
+
+def websocket_handshake(port: int, host: str):
+    key = base64.b64encode(os.urandom(16)).decode("ascii")
+    sock = socket.create_connection(("127.0.0.1", port), timeout=3)
+    sock.settimeout(3)
+    request = websocket_upgrade_request(host, key=key)
     sock.sendall(request)
     response = b""
     while b"\r\n\r\n" not in response:
@@ -196,6 +279,168 @@ def websocket_handshake(port: int, host: str):
     if expected not in response:
         raise RuntimeError("websocket accept key mismatch")
     return sock
+
+
+def hpack_encode_integer(value: int, prefix_bits: int, prefix_mask: int) -> bytes:
+    max_prefix = (1 << prefix_bits) - 1
+    if value < max_prefix:
+        return bytes([prefix_mask | value])
+
+    output = bytearray([prefix_mask | max_prefix])
+    value -= max_prefix
+    while value >= 128:
+        output.append((value % 128) + 128)
+        value //= 128
+    output.append(value)
+    return bytes(output)
+
+
+def hpack_decode_integer(data: bytes, offset: int, prefix_bits: int):
+    max_prefix = (1 << prefix_bits) - 1
+    value = data[offset] & max_prefix
+    offset += 1
+    if value < max_prefix:
+        return value, offset
+
+    shift = 0
+    while True:
+        byte = data[offset]
+        offset += 1
+        value += (byte & 0x7F) << shift
+        if (byte & 0x80) == 0:
+            return value, offset
+        shift += 7
+
+
+def hpack_encode_string(value: str) -> bytes:
+    encoded = value.encode("utf-8")
+    return hpack_encode_integer(len(encoded), 7, 0x00) + encoded
+
+
+def hpack_decode_string(data: bytes, offset: int):
+    if data[offset] & 0x80:
+        raise RuntimeError("HPACK Huffman strings are not supported by this test helper")
+    size, offset = hpack_decode_integer(data, offset, 7)
+    value = data[offset:offset + size].decode("utf-8")
+    return value, offset + size
+
+
+def hpack_static_entry(index: int):
+    if index <= 0 or index > len(HPACK_STATIC_TABLE):
+        raise RuntimeError(f"HPACK static index out of range: {index}")
+    return HPACK_STATIC_TABLE[index - 1]
+
+
+def hpack_encode_header_block(headers) -> bytes:
+    output = bytearray()
+    for name, value in headers:
+        exact = HPACK_EXACT_INDEX.get((name, value))
+        if exact:
+            output.extend(hpack_encode_integer(exact, 7, 0x80))
+            continue
+
+        name_index = HPACK_NAME_INDEX.get(name, 0)
+        output.extend(hpack_encode_integer(name_index, 4, 0x00))
+        if name_index == 0:
+            output.extend(hpack_encode_string(name))
+        output.extend(hpack_encode_string(value))
+    return bytes(output)
+
+
+def hpack_decode_header_block(block: bytes):
+    headers = []
+    offset = 0
+    while offset < len(block):
+        byte = block[offset]
+        if byte & 0x80:
+            index, offset = hpack_decode_integer(block, offset, 7)
+            headers.append(hpack_static_entry(index))
+            continue
+
+        if byte & 0x40:
+            name_index, offset = hpack_decode_integer(block, offset, 6)
+        else:
+            name_index, offset = hpack_decode_integer(block, offset, 4)
+
+        if name_index == 0:
+            name, offset = hpack_decode_string(block, offset)
+        else:
+            name, _ = hpack_static_entry(name_index)
+        value, offset = hpack_decode_string(block, offset)
+        headers.append((name, value))
+    return headers
+
+
+def http2_frame(frame_type: int, flags: int = 0, stream_id: int = 0, payload: bytes = b"") -> bytes:
+    return (
+        len(payload).to_bytes(3, "big")
+        + bytes([frame_type, flags])
+        + (stream_id & 0x7FFFFFFF).to_bytes(4, "big")
+        + payload
+    )
+
+
+def read_http2_frame(sock: socket.socket):
+    header = read_exact(sock, 9)
+    length = int.from_bytes(header[:3], "big")
+    frame_type = header[3]
+    flags = header[4]
+    stream_id = int.from_bytes(header[5:9], "big") & 0x7FFFFFFF
+    return frame_type, flags, stream_id, read_exact(sock, length)
+
+
+def http2_get(port: int, path: str, authority: str = "localhost"):
+    headers = [
+        (":method", "GET"),
+        (":scheme", "http"),
+        (":path", path),
+        (":authority", authority),
+    ]
+    request = (
+        HTTP2_PREFACE
+        + http2_frame(HTTP2_FRAME_SETTINGS)
+        + http2_frame(
+            HTTP2_FRAME_HEADERS,
+            HTTP2_FLAG_END_HEADERS | HTTP2_FLAG_END_STREAM,
+            1,
+            hpack_encode_header_block(headers),
+        )
+    )
+
+    sock = socket.create_connection(("127.0.0.1", port), timeout=3)
+    sock.settimeout(5)
+    response_headers = {}
+    response_body = b""
+    try:
+        sock.sendall(request)
+        deadline = time.monotonic() + 5
+        while time.monotonic() < deadline:
+            frame_type, flags, stream_id, payload = read_http2_frame(sock)
+            if frame_type == HTTP2_FRAME_SETTINGS and (flags & HTTP2_FLAG_ACK) == 0:
+                sock.sendall(http2_frame(HTTP2_FRAME_SETTINGS, HTTP2_FLAG_ACK))
+                continue
+            if stream_id != 1:
+                continue
+            if frame_type == HTTP2_FRAME_HEADERS:
+                for name, value in hpack_decode_header_block(payload):
+                    response_headers[name] = value
+                if flags & HTTP2_FLAG_END_STREAM:
+                    break
+            elif frame_type == HTTP2_FRAME_DATA:
+                response_body += payload
+                if flags & HTTP2_FLAG_END_STREAM:
+                    break
+        return response_headers, response_body
+    finally:
+        sock.close()
+
+
+def assert_waf_http_response(name: str, response) -> None:
+    status, _, headers, body = response
+    assert status == 403, (name, response)
+    assert headers.get("x-rimau-waf") == "blocked", (name, headers)
+    assert headers.get("x-rimau-waf-rule-id") == "930100", (name, headers)
+    assert b"Forbidden by Rimau ModSecurity compatible WAF" in body, (name, body)
 
 
 class WebSocketUpstream:
@@ -636,6 +881,51 @@ def test_request_timeout(server_path: Path, runtime_root: Path) -> None:
             connection.close()
 
 
+def test_waf_entry_points(server_path: Path, runtime_root: Path) -> None:
+    proxy_upstream_port = free_port()
+    updates = [
+        "worker_threads=1",
+        "rate_limit_enabled=false",
+        "http2_enabled=true",
+        "modsecurity_enabled=true",
+        "modsecurity_owasp_crs_enabled=true",
+        "modsecurity_blocking_enabled=true",
+        "modsecurity_anomaly_threshold=5",
+        "modsecurity_max_inspection_bytes=131072",
+        f"virtual_hosts=proxy.test=proxy:http://127.0.0.1:{proxy_upstream_port}",
+    ]
+    with RimauServer(server_path, runtime_root, extra_updates=updates) as server:
+        assert_waf_http_response(
+            "HTTP/1.1 WAF block",
+            http_request(
+                server.port,
+                b"GET /../../etc/passwd HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+            ),
+        )
+
+        assert_waf_http_response(
+            "WebSocket local WAF block",
+            http_request(
+                server.port,
+                websocket_upgrade_request("localhost", "/../../etc/passwd"),
+            ),
+        )
+
+        assert_waf_http_response(
+            "WebSocket proxy WAF block",
+            http_request(
+                server.port,
+                websocket_upgrade_request("proxy.test", "/../../etc/passwd"),
+            ),
+        )
+
+        headers, body = http2_get(server.port, "/../../etc/passwd")
+        assert headers.get(":status") == "403", (headers, body)
+        assert headers.get("x-rimau-waf") == "blocked", (headers, body)
+        assert headers.get("x-rimau-waf-rule-id") == "930100", (headers, body)
+        assert b"Forbidden by Rimau ModSecurity compatible WAF" in body, (headers, body)
+
+
 def main() -> int:
     if len(sys.argv) != 3:
         print("usage: test_http1_network.py /path/to/rimau-server /path/to/runtime-root", file=sys.stderr)
@@ -662,6 +952,7 @@ def main() -> int:
     test_connection_limits(server_path, runtime_root)
     test_timeout_and_slow_client_behavior(server_path, runtime_root)
     test_request_timeout(server_path, runtime_root)
+    test_waf_entry_points(server_path, runtime_root)
 
     print("http1 network integration tests passed")
     return 0

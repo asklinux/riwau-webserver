@@ -9,6 +9,8 @@ certs/
 cmake-build-*/
 compile_commands.json
 .cache/
+__pycache__/
+*.pyc
 *.o
 *.a
 *.so

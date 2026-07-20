@@ -51,6 +51,7 @@ cmake --build build
 ctest --test-dir build --output-on-failure
 ctest --test-dir build --output-on-failure -R rimau_http_fuzz
 ctest --test-dir build --output-on-failure -R rimau_tls_alpn_h2_curl
+ctest --test-dir build --output-on-failure -R rimau_tls_sni_cert_selection
 ```
 
 Build pertama memerlukan network untuk source archive yang dipin dalam `CMakeLists.txt` kecuali cache CMake sudah ada. Build-time masih memerlukan compiler dan tool asas host seperti `gcc`/`g++`, `make`, `perl`, `gawk`, `msgfmt`, `python3`, dan `m4`; sasaran yang dibuang ialah runtime shared-library dependency untuk binary deployable. Bundled glibc semasa hanya wired untuk Linux x86_64.

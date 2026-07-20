@@ -417,6 +417,14 @@ if(RIMAU_ENABLE_TESTS)
             "${RIMAU_OPENSSL_INSTALL_DIR}/bin/openssl")
     set_tests_properties(rimau_tls_alpn_h2_curl PROPERTIES
         SKIP_REGULAR_EXPRESSION "SKIP:")
+    add_test(
+        NAME rimau_tls_sni_cert_selection
+        COMMAND
+            "${RIMAU_PYTHON3_EXECUTABLE}"
+            "${CMAKE_SOURCE_DIR}/tests/test_tls_sni_cert_selection.py"
+            "$<TARGET_FILE:rimau-server>"
+            "${CMAKE_BINARY_DIR}/test-runtime"
+            "${RIMAU_OPENSSL_INSTALL_DIR}/bin/openssl")
 endif()
 
 install(TARGETS rimau-server RUNTIME DESTINATION bin)

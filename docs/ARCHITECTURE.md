@@ -619,6 +619,7 @@ Current:
 - TLS 1.2 and TLS 1.3 are supported through bundled OpenSSL.
 - TLS cipher list/ciphersuites are SQLite-configurable.
 - SNI validates configured hostnames and can select alternate certificate contexts through `tls_sni_certificates`.
+- Automated CTest `rimau_tls_sni_cert_selection` verifies default fallback, exact-host, and simple wildcard SNI certificate selection using bundled OpenSSL fingerprints.
 - ALPN selects `http/1.1` or `h2` based on `tls_alpn_protocols` and enabled protocol flags.
 - TLS certificate/key/settings reload on SIGHUP applies to new connections.
 - Requests are dispatched through `Transaction` and `RequestHandler`.
@@ -743,6 +744,7 @@ Implemented:
 - `rimau-server` links as a fully static Linux x86_64 ELF through bundled glibc 2.43 sysroot in the current validation.
 - TLS 1.2 and TLS 1.3.
 - SNI validation and multi-certificate SNI selection.
+- Automated SNI certificate selection coverage for default fallback, exact host, and simple wildcard host patterns.
 - ALPN `http/1.1` and partial `h2`.
 - TLS certificate/key/settings reload for new connections on SIGHUP.
 - Request/header/body/idle timeout enforcement.

@@ -991,3 +991,28 @@ The previous TLS ALPN `h2` validation used Python `ssl` plus manually constructe
 Consequence:
 
 This test proves real-client TLS ALPN `h2` negotiation only. It must not be treated as proof that Rimau has production-complete HTTP/2 or successful curl/nghttp2 request serving. Full real-client HTTP/2 request success remains pending until HPACK Huffman/dynamic table behavior, stream lifecycle, continuation handling, and flow control are completed or replaced by a mature bundled HTTP/2 library.
+
+## ADR-0038: Test SNI Certificate Selection With Bundled OpenSSL Fingerprints
+
+- Date: 2026-07-20
+- Status: Accepted
+
+Decision:
+
+Add an automated CTest named `rimau_tls_sni_cert_selection` that proves Rimau selects the expected TLS certificate for default, exact SNI, and simple wildcard SNI cases.
+
+Implementation:
+
+- The test script is `tests/test_tls_sni_cert_selection.py`.
+- It generates three temporary self-signed certificates with the bundled OpenSSL binary from the active build tree: default fallback, `api.example.test`, and `*.tenant.test`.
+- It configures SQLite `tls_sni_certificates` with `api.example.test=cert|key;*.tenant.test=cert|key`.
+- It starts a temporary Rimau TLS server and connects with bundled `openssl s_client` using no SNI, `api.example.test`, `app.tenant.test`, and `unknown.example.test`.
+- It extracts the first certificate returned by the server and compares SHA-256 fingerprints with the expected certificate files through bundled `openssl x509`.
+
+Reason:
+
+The SNI callback already had code paths for exact and simple wildcard certificate selection, but those paths were only documented and manually validated. Fingerprint comparison through bundled OpenSSL gives a deterministic end-to-end test without storing certificates or private keys in the repository.
+
+Consequence:
+
+Rimau now has automated coverage for multi-certificate SNI selection. This does not complete production certificate lifecycle management, OCSP stapling, renewal automation, permission policy, or rollback guidance; those remain separate Phase 3 work.

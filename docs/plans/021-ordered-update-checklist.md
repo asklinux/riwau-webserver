@@ -86,8 +86,9 @@ Untuk setiap item:
 - [x] Tambah automated TLS ALPN `h2` test dengan real HTTP/2 client.
   - Done criteria: bukan hanya Python raw-frame smoke.
   - Status: Added CTest `rimau_tls_alpn_h2_curl` via `tests/test_tls_alpn_h2_curl.py`; it starts temporary TLS Rimau config, uses bundled OpenSSL for a dev cert, runs `curl --http2`, and verifies real-client ALPN selection of `h2`. Current test accepts the known partial HTTP/2 HPACK Huffman `COMPRESSION_ERROR` path, so full real-client HTTP/2 request success remains Phase 4 work.
-- [ ] Tambah automated multi-certificate SNI selection test.
+- [x] Tambah automated multi-certificate SNI selection test.
   - Done criteria: cert dipilih mengikut host exact/wildcard.
+  - Status: Added CTest `rimau_tls_sni_cert_selection` via `tests/test_tls_sni_cert_selection.py`; it generates default, exact-host, and wildcard-host certificates with bundled OpenSSL, starts a temporary TLS Rimau server, then uses bundled `openssl s_client`/`x509` fingerprints to verify default fallback, exact `api.example.test`, and wildcard `app.tenant.test` certificate selection.
 - [ ] Tambah OCSP stapling decision/implementation.
   - Done criteria: ADR diterima dan test/config wujud, atau dinyatakan tidak disokong.
 - [ ] Tambah production certificate management guide.

@@ -48,7 +48,6 @@
 - Add OCSP stapling. Needs verification.
 - Add automated test that ALPN advertises only implemented or explicitly partial-tested protocols and still rejects `h3`.
 - Add tests for TLS config failure modes.
-- Add automated integration test for multi-certificate SNI certificate selection.
 - Add automated check that `rimau-server` is a fully static ELF and has no dynamic interpreter.
 - Add automated check that the link command uses the bundled glibc sysroot when `RIMAU_USE_BUNDLED_GLIBC=ON`.
 - Add documented bundled dependency update script to refresh OpenSSL, SQLite, zlib, Bison, Linux headers, and glibc versions and SHA256 pins.

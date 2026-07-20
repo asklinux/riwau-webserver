@@ -63,6 +63,7 @@ Implemented:
 - HTTP/2 frame parser/serializer, SETTINGS payload parser/serializer, dan HPACK static-table/literal-no-Huffman baseline dengan literal incremental decode tanpa dynamic-table persistence
 - Partial HTTP/2 request serving dalam server untuk cleartext h2c dan TLS ALPN `h2`: parse client preface, SETTINGS, PING, HEADERS, DATA; dispatch request ke shared handler pipeline; reply HTTP/2 HEADERS/DATA
 - Automated TLS ALPN `h2` CTest with real `curl --http2` client that verifies ALPN selects `h2`; full curl request success still hits the known partial HPACK Huffman limit until HTTP/2 HPACK is completed
+- Automated multi-certificate SNI selection CTest with bundled OpenSSL that verifies default fallback, exact host, and simple wildcard certificate selection
 - HTTP/3 QUIC varint parser/serializer, frame parser/serializer, dan SETTINGS payload parser/serializer
 
 Planned:
@@ -146,6 +147,7 @@ Not present:
     |-- test_http_parser.cpp
     |-- test_http1_network.py
     |-- test_tls_alpn_h2_curl.py
+    |-- test_tls_sni_cert_selection.py
     |-- test_http2_wire.cpp
     |-- test_http3_wire.cpp
     |-- test_http_response.cpp
@@ -200,6 +202,7 @@ Run tests:
 ```bash
 ctest --test-dir build --output-on-failure
 ctest --test-dir build --output-on-failure -R rimau_tls_alpn_h2_curl
+ctest --test-dir build --output-on-failure -R rimau_tls_sni_cert_selection
 ```
 
 Shortcut:
@@ -391,6 +394,7 @@ Production deployment, service manager, packaging, container, TLS certificate ha
 - HTTP/1.1 network integration test melalui CTest untuk keep-alive, max request cap, request/header/body/idle timeout, pipelining, chunked body, request-smuggling rejection, rate limiting, connection limits, slow-client behavior, WAF block paths untuk HTTP/1.1/WebSocket/WebSocket proxy/partial HTTP/2, range, gzip, directory index, custom error page, WebSocket echo, dan WebSocket proxy.
 - HTTP/1.1 network integration test juga meliputi `virtual_host_waf_overrides` untuk default WAF block dan per-host allow path melalui `enabled:false`, `rule_exceptions`, dan threshold lebih tinggi.
 - TLS ALPN `h2` real-client integration test melalui CTest target `rimau_tls_alpn_h2_curl`; test ini guna `curl --http2`/nghttp2 apabila tersedia dan mengesahkan server memilih ALPN `h2`.
+- TLS SNI multi-certificate selection test melalui CTest target `rimau_tls_sni_cert_selection`; test ini guna bundled OpenSSL untuk menjana sijil dan membandingkan fingerprint cert default, exact host, dan wildcard host yang dipilih server.
 - WAF false-positive regression corpus melalui CTest untuk trafik normal curl, browser navigation/static asset, JSON API, form submission, dan WebSocket upgrade.
 - SQLite config database test asas melalui CTest.
 - CLI integration test melalui CTest untuk `--database`, `--set`, `--check-config`, dan `--protocols`.
@@ -408,7 +412,7 @@ Production deployment, service manager, packaging, container, TLS certificate ha
 - HTTP/1.1: Partial; body besar boleh discroll ke fail sementara dan dibaca handler melalui pull reader, basic chunked response API, multipart range/`If-Range`, configurable directory index, dan custom error page sudah ada. Live in-flight request streaming sebelum handler dispatch, reverse proxy body streaming, dan producer-side async response backpressure belum lengkap.
 - HTTP/2: Partial h2c dan TLS ALPN `h2` request serving; frame codec, SETTINGS/PING, HEADERS/DATA path, HPACK baseline, real-client TLS ALPN `h2` negotiation coverage, and shared handler pipeline dispatch exist. Continuation assembly, full HPACK dynamic/Huffman behavior, real-client request success, and flow control masih Planned.
 - HTTP/3: Partial wire codec primitives; UDP/QUIC/QPACK/live request serving masih Planned.
-- TLS: Partial for HTTP/1.1 HTTPS and HTTP/2 ALPN `h2` basics with TLS 1.2/1.3, SNI validation, multi-certificate SNI selection, ALPN `http/1.1`/`h2`, safe cipher config, and new-connection certificate reload.
+- TLS: Partial for HTTP/1.1 HTTPS and HTTP/2 ALPN `h2` basics with TLS 1.2/1.3, SNI validation, automated multi-certificate SNI selection coverage, ALPN `http/1.1`/`h2`, safe cipher config, and new-connection certificate reload.
 - Event loop performance architecture: Partial with Linux `epoll` backend.
 - Virtual hosts: Partial; exact host, simple wildcard, static document root, proxy route, and script declaration are implemented.
 - Reverse proxy: Partial; HTTP/HTTPS upstream, buffered response untuk HTTP biasa, WebSocket tunnel untuk proxy vhost, round-robin asas, retry/failover asas, dan passive circuit breaker are implemented.
@@ -488,6 +492,14 @@ ctest --test-dir build --output-on-failure -R rimau_tls_alpn_h2_curl
 ```
 
 This test runs `curl --http2` when curl reports HTTP2 support. It currently proves ALPN `h2` negotiation with a real client, not full HTTP/2 request success.
+
+Automated TLS SNI multi-certificate selection smoke:
+
+```bash
+ctest --test-dir build --output-on-failure -R rimau_tls_sni_cert_selection
+```
+
+This test proves default fallback, exact host, and simple wildcard SNI certificate selection using bundled OpenSSL fingerprints.
 
 Documentation check:
 

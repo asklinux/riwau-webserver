@@ -28,6 +28,7 @@ Implemented:
 - TLS 1.2/TLS 1.3 range configuration through SQLite.
 - TLS cipher list and TLS 1.3 ciphersuites configuration through SQLite.
 - SNI hostname validation and multi-certificate SNI selection.
+- Automated TLS SNI multi-certificate selection smoke through CTest target `rimau_tls_sni_cert_selection` using bundled OpenSSL fingerprints for default fallback, exact host, and simple wildcard host patterns.
 - ALPN callback for `http/1.1` and partial `h2` when HTTP/2 is enabled.
 - SIGHUP TLS certificate/key/settings reload for new connections.
 - Dev certificate generation with bundled OpenSSL binary.
@@ -149,7 +150,7 @@ Semasa pemeriksaan awal pada 2026-07-18:
 | HTTP/1.1 | Partial | GET/HEAD static, POST/PUT/PATCH/DELETE JSON scaffold, OPTIONS, Content-Length, chunked decode, file-backed large-body spooling, pull request-body reader, basic chunked response API, keep-alive, basic pipelining, single/multipart range with `If-Range`, gzip, configurable directory index/custom error page, WebSocket echo, WebSocket reverse proxy tunnel, and extracted testable request framing. |
 | HTTP/2 | Partial | Frame codec, SETTINGS/PING basics, HPACK baseline, cleartext h2c and TLS ALPN `h2` HEADERS/DATA request serving through the shared handler pipeline exist; real-client TLS ALPN `h2` negotiation is covered with curl/nghttp2, but no production flow control, CONTINUATION assembly, HPACK Huffman, dynamic-table persistence, or full real-client request success yet. |
 | HTTP/3 | Partial | QUIC varint, frame codec, and SETTINGS codec exist; no UDP/QUIC/QPACK/live serving yet. |
-| TLS | Partial | HTTP/1.1 HTTPS and partial HTTP/2 ALPN `h2` via bundled static OpenSSL 4.0.1 with TLS 1.2/1.3, SNI validation, multi-certificate SNI selection, ALPN `http/1.1`/`h2`, safe cipher config, and SIGHUP context reload for new connections. |
+| TLS | Partial | HTTP/1.1 HTTPS and partial HTTP/2 ALPN `h2` via bundled static OpenSSL 4.0.1 with TLS 1.2/1.3, SNI validation, automated multi-certificate SNI selection coverage, ALPN `http/1.1`/`h2`, safe cipher config, and SIGHUP context reload for new connections. |
 | Static files | Partial | Serves from `document_root`, supports configurable directory index/custom error page, MIME detection, gzip, single/multipart range, and `If-Range`; no zero-copy path yet. |
 | Virtual hosts | Partial | Exact host and simple `*.domain` matching, static vhost, proxy vhost, and script declarations. |
 | Reverse proxy | Partial | HTTP/HTTPS upstream, optional default-trust-path certificate verification, buffered normal HTTP response, WebSocket tunnel data path in worker `epoll`, basic round-robin, retry/failover, and passive circuit breaker; no per-upstream CA/pinning policy, active health checks, normal HTTP proxy streaming, or upstream connection pooling yet. |
@@ -157,7 +158,7 @@ Semasa pemeriksaan awal pada 2026-07-18:
 | Request pipeline | Partial | Handler/factory/transaction/response sink implemented for static, vhost, reverse proxy, and script-placeholder HTTP/1.1. |
 | Config | Partial | SQLite table `rimau_config`, schema metadata table `rimau_schema_migrations`, protocol, TLS, keep-alive, static file, timeout, rate-limit, IP-list, security-header, virtual-host/proxy keys, and limited SIGHUP reload behavior. |
 | Security | Partial | Baseline HTTP framing hardening, timeout, rate limit, connection limit, built-in ModSecurity-compatible WAF subset with per-host overrides and structured redacted audit events, configurable security header values, IPv4/IPv6 IP allow/block list, and deterministic parser/framing fuzz smoke are implemented; broader fuzzing and production hardening remain pending, while full ModSecurity/CRS integration is deferred beyond P1 by ADR-0034. |
-| Tests | Partial | Parser, HTTP/1.1 session/framing, deterministic HTTP parser/framing fuzz smoke, TLS ALPN `h2` real-client curl smoke, HTTP/1.1 network integration including request-smuggling rejection, rate limiting, connection limits, request/header/body/idle timeout slow-client behavior, WAF block paths for HTTP/1.1/WebSocket/WebSocket proxy/partial HTTP/2, WAF virtual-host override and audit-log redaction behavior, WAF false-positive corpus, response serializer, handler pipeline, SQLite config, CLI config, protocol capability, HTTP/2 wire, HTTP/3 wire, virtual host, and WAF tests. |
+| Tests | Partial | Parser, HTTP/1.1 session/framing, deterministic HTTP parser/framing fuzz smoke, TLS ALPN `h2` real-client curl smoke, TLS SNI multi-certificate selection smoke, HTTP/1.1 network integration including request-smuggling rejection, rate limiting, connection limits, request/header/body/idle timeout slow-client behavior, WAF block paths for HTTP/1.1/WebSocket/WebSocket proxy/partial HTTP/2, WAF virtual-host override and audit-log redaction behavior, WAF false-positive corpus, response serializer, handler pipeline, SQLite config, CLI config, protocol capability, HTTP/2 wire, HTTP/3 wire, virtual host, and WAF tests. |
 | Deployment | Planned | No production deployment files. |
 | Database | Partial | SQLite is used for runtime configuration only; the SQLite engine is bundled static and config schema version `1` is recorded. |
 | I/O model | Partial | Linux `epoll` reactor with per-worker event loops and SO_REUSEPORT implemented; benchmarks still pending. |
@@ -168,8 +169,8 @@ Most recent completed on 2026-07-20:
 
 ```bash
 cmake -S . -B build
-python3 -m py_compile tests/test_tls_alpn_h2_curl.py
-ctest --test-dir build --output-on-failure -R rimau_tls_alpn_h2_curl
+python3 -m py_compile tests/test_tls_sni_cert_selection.py
+ctest --test-dir build --output-on-failure -R rimau_tls_sni_cert_selection
 ctest --test-dir build --output-on-failure
 cmake --build build --target rimau-server
 git diff --check
@@ -178,11 +179,20 @@ git diff --check
 Result:
 
 - CMake configure passed.
-- Python syntax check for `tests/test_tls_alpn_h2_curl.py` passed.
-- `rimau_tls_alpn_h2_curl` passed, 1/1.
-- Full CTest passed, 14/14.
+- Python syntax check for `tests/test_tls_sni_cert_selection.py` passed.
+- `rimau_tls_sni_cert_selection` passed, 1/1.
+- Full CTest passed, 15/15.
 - `rimau-server` target built.
 - Diff whitespace check passed.
+
+Phase 3 SNI multi-certificate selection test update:
+
+- Added `tests/test_tls_sni_cert_selection.py`.
+- Added CTest target `rimau_tls_sni_cert_selection`.
+- Test generates default, exact-host, and wildcard-host certificates with the bundled OpenSSL binary.
+- Test starts a temporary TLS Rimau server with SQLite `tls_sni_certificates=api.example.test=cert|key;*.tenant.test=cert|key`.
+- Test uses bundled `openssl s_client` and `openssl x509` SHA-256 fingerprints to verify no-SNI/default fallback, exact `api.example.test`, wildcard `app.tenant.test`, and unknown-host default fallback certificate selection.
+- Added ADR-0038 and marked the Phase 3 SNI checklist item complete.
 
 Phase 3 TLS ALPN `h2` real-client smoke update:
 

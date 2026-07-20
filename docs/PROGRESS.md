@@ -1093,8 +1093,9 @@ CI workflow update:
 - Added `.github/workflows/ci.yml`.
 - `docs/plans/021-ordered-update-checklist.md` now marks the CI workflow file item as complete, while keeping the first remote GitHub Actions run as pending verification.
 - CI triggers on push to `main` and on pull requests.
-- The workflow installs build tools on `ubuntu-24.04`, configures CMake with `RIMAU_ENABLE_TESTS=ON`, `RIMAU_FULLY_STATIC_SERVER=OFF`, and `RIMAU_USE_BUNDLED_GLIBC=OFF`, then builds with Ninja.
+- The workflow installs build tools on `ubuntu-latest`, configures CMake with `RIMAU_ENABLE_TESTS=ON`, `RIMAU_FULLY_STATIC_SERVER=OFF`, and `RIMAU_USE_BUNDLED_GLIBC=OFF`, then builds with Ninja.
 - CI keeps bundled OpenSSL, SQLite, and zlib enabled, so tests still exercise the required bundled dependency path for those libraries.
 - CI runs `ctest --test-dir build-ci --output-on-failure`, `rimau-server --check-config`, `rimau-server --protocols`, and `rimau-waf-tests`.
 - Bundled glibc full static deployment checks remain a separate checklist item because building glibc from source is too heavy for fast PR feedback.
 - First remote GitHub Actions run after push is still pending. Needs verification.
+- Initial workflow run `29711550002` failed with `startup_failure` before jobs were created and without logs; workflow was simplified to use `ubuntu-latest` and no cache expression before retrying.

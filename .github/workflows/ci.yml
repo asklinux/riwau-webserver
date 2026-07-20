@@ -13,7 +13,7 @@ permissions:
 jobs:
   linux-fast:
     name: Linux fast build and tests
-    runs-on: ubuntu-24.04
+    runs-on: ubuntu-latest
     timeout-minutes: 60
 
     env:
@@ -40,14 +40,6 @@ jobs:
             perl \
             python3 \
             unzip
-
-      - name: Cache bundled source builds
-        uses: actions/cache@v4
-        with:
-          path: build-ci/_deps
-          key: rimau-ci-deps-${{ runner.os }}-${{ hashFiles('CMakeLists.txt') }}
-          restore-keys: |
-            rimau-ci-deps-${{ runner.os }}-
 
       - name: Configure
         run: |

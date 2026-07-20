@@ -97,6 +97,20 @@ def assert_rejected_request(port: int, name: str, request: bytes, expected_statu
         connection.close()
 
 
+def assert_new_connection_closed(port: int, name: str) -> None:
+    sock = socket.create_connection(("127.0.0.1", port), timeout=3)
+    sock.settimeout(2)
+    try:
+        try:
+            sock.sendall(b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n")
+            data = sock.recv(4096)
+        except (BrokenPipeError, ConnectionResetError):
+            data = b""
+        assert data == b"", (name, data[:200])
+    finally:
+        sock.close()
+
+
 def websocket_accept(key: str) -> str:
     guid = "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
     digest = hashlib.sha1((key + guid).encode("ascii")).digest()
@@ -241,7 +255,7 @@ class WebSocketUpstream:
 
 
 class RimauServer:
-    def __init__(self, server_path: Path, runtime_root: Path, upstream_port: int):
+    def __init__(self, server_path: Path, runtime_root: Path, upstream_port: int | None = None, extra_updates=None):
         self.server_path = server_path
         self.root = Path(tempfile.mkdtemp(prefix="rimau-http1-network-", dir=runtime_root))
         self.document_root = self.root / "public"
@@ -251,6 +265,7 @@ class RimauServer:
         self.port = free_port()
         self.process = None
         self.upstream_port = upstream_port
+        self.extra_updates = list(extra_updates or [])
 
     def __enter__(self):
         (self.document_root / "index.html").write_text("Rimau HTTP/1 integration\n", encoding="utf-8")
@@ -270,8 +285,10 @@ class RimauServer:
             "http_keep_alive_max_requests=2",
             "idle_timeout_seconds=1",
             "virtual_hosts_enabled=true",
-            f"virtual_hosts=proxy.test=proxy:http://127.0.0.1:{self.upstream_port}",
         ]
+        if self.upstream_port is not None:
+            updates.append(f"virtual_hosts=proxy.test=proxy:http://127.0.0.1:{self.upstream_port}")
+        updates.extend(self.extra_updates)
         command = [str(self.server_path), "--database", str(self.database)]
         for update in updates:
             command.extend(["--set", update])
@@ -285,6 +302,7 @@ class RimauServer:
         )
         log_handle.close()
         wait_for_port(self.port, self.process)
+        time.sleep(0.2)
         return self
 
     def __exit__(self, exc_type, exc, tb):
@@ -503,6 +521,121 @@ def test_websocket_proxy(port: int, upstream: WebSocketUpstream) -> None:
     upstream.join()
 
 
+def test_rate_limit(server_path: Path, runtime_root: Path) -> None:
+    updates = [
+        "worker_threads=1",
+        "rate_limit_enabled=true",
+        "rate_limit_requests_per_minute=1",
+    ]
+    with RimauServer(server_path, runtime_root, extra_updates=updates) as server:
+        first = http_request(
+            server.port,
+            b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+        )
+        assert first[0] == 200, first
+
+        second = http_request(
+            server.port,
+            b"GET / HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+        )
+        assert second[0] == 429, second
+        assert b"Too Many Requests" in second[3], second
+
+
+def test_connection_limits(server_path: Path, runtime_root: Path) -> None:
+    with RimauServer(
+        server_path,
+        runtime_root,
+        extra_updates=[
+            "worker_threads=1",
+            "rate_limit_enabled=false",
+            "per_ip_connection_limit=1",
+            "global_connection_limit=100",
+            "header_timeout_seconds=5",
+        ],
+    ) as server:
+        holder = socket.create_connection(("127.0.0.1", server.port), timeout=3)
+        try:
+            time.sleep(0.2)
+            assert_new_connection_closed(server.port, "per-ip connection limit")
+        finally:
+            holder.close()
+
+    with RimauServer(
+        server_path,
+        runtime_root,
+        extra_updates=[
+            "worker_threads=1",
+            "rate_limit_enabled=false",
+            "per_ip_connection_limit=100",
+            "global_connection_limit=1",
+            "header_timeout_seconds=5",
+        ],
+    ) as server:
+        holder = socket.create_connection(("127.0.0.1", server.port), timeout=3)
+        try:
+            time.sleep(0.2)
+            assert_new_connection_closed(server.port, "global connection limit")
+        finally:
+            holder.close()
+
+
+def test_timeout_and_slow_client_behavior(server_path: Path, runtime_root: Path) -> None:
+    updates = [
+        "worker_threads=1",
+        "rate_limit_enabled=false",
+        "request_timeout_seconds=5",
+        "header_timeout_seconds=1",
+        "body_timeout_seconds=1",
+        "idle_timeout_seconds=1",
+    ]
+    with RimauServer(server_path, runtime_root, extra_updates=updates) as server:
+        header = HttpConnection(server.port)
+        try:
+            header.send(b"GET /slow HTTP/1.1\r\nHost: localhost")
+            time.sleep(2.5)
+            response = header.read_response()
+            assert response[0] == 408, response
+        finally:
+            header.close()
+
+        body = HttpConnection(server.port)
+        try:
+            body.send(
+                b"POST /slow-body HTTP/1.1\r\n"
+                b"Host: localhost\r\n"
+                b"Content-Length: 10\r\n"
+                b"Connection: close\r\n"
+                b"\r\n"
+                b"hi"
+            )
+            time.sleep(2.5)
+            response = body.read_response()
+            assert response[0] == 408, response
+        finally:
+            body.close()
+
+
+def test_request_timeout(server_path: Path, runtime_root: Path) -> None:
+    updates = [
+        "worker_threads=1",
+        "rate_limit_enabled=false",
+        "request_timeout_seconds=1",
+        "header_timeout_seconds=5",
+        "body_timeout_seconds=5",
+        "idle_timeout_seconds=5",
+    ]
+    with RimauServer(server_path, runtime_root, extra_updates=updates) as server:
+        connection = HttpConnection(server.port)
+        try:
+            connection.send(b"GET /request-timeout HTTP/1.1\r\nHost: localhost")
+            time.sleep(2.5)
+            response = connection.read_response()
+            assert response[0] == 408, response
+        finally:
+            connection.close()
+
+
 def main() -> int:
     if len(sys.argv) != 3:
         print("usage: test_http1_network.py /path/to/rimau-server /path/to/runtime-root", file=sys.stderr)
@@ -524,6 +657,11 @@ def main() -> int:
         test_request_smuggling_rejections(server.port)
         test_websocket_echo(server.port)
         test_websocket_proxy(server.port, upstream)
+
+    test_rate_limit(server_path, runtime_root)
+    test_connection_limits(server_path, runtime_root)
+    test_timeout_and_slow_client_behavior(server_path, runtime_root)
+    test_request_timeout(server_path, runtime_root)
 
     print("http1 network integration tests passed")
     return 0

@@ -59,8 +59,9 @@ Untuk setiap item:
 - [x] Tambah integration tests request smuggling.
   - Done criteria: duplicate/invalid `Content-Length`, TE/CL conflict, obs-fold, bare CR/LF, dan unsupported TE diuji.
   - Status: HTTP/1.1 network integration now rejects duplicate/invalid `Content-Length`, `Content-Length` plus `Transfer-Encoding`, unsupported `Transfer-Encoding`, obs-fold, bare LF, and bare CR while ensuring an appended smuggled request is not processed.
-- [ ] Tambah integration tests rate limit, connection limit, timeout, dan slow-client behavior.
+- [x] Tambah integration tests rate limit, connection limit, timeout, dan slow-client behavior.
   - Done criteria: behavior keselamatan runtime terbukti end-to-end.
+  - Status: HTTP/1.1 network integration now covers fixed-window rate limiting, per-IP and global connection limit rejection, and request/header/body/idle timeout slow-client behavior using SQLite-configured limits.
 - [ ] Tambah WAF integration tests untuk HTTP/1.1, WebSocket upgrade, WebSocket proxy upgrade, dan partial HTTP/2.
   - Done criteria: WAF block path diuji di semua entry point.
 - [ ] Bina WAF false-positive regression corpus.

@@ -152,14 +152,26 @@ Semasa pemeriksaan awal pada 2026-07-18:
 | Request pipeline | Partial | Handler/factory/transaction/response sink implemented for static, vhost, reverse proxy, and script-placeholder HTTP/1.1. |
 | Config | Partial | SQLite table `rimau_config`, schema metadata table `rimau_schema_migrations`, protocol, TLS, keep-alive, static file, timeout, rate-limit, IP-list, security-header, virtual-host/proxy keys, and limited SIGHUP reload behavior. |
 | Security | Partial | Baseline HTTP framing hardening, timeout, rate limit, connection limit, built-in ModSecurity-compatible WAF subset, configurable security header values, and IPv4/IPv6 IP allow/block list are implemented; fuzzing, full ModSecurity/CRS integration, and production hardening remain pending. |
-| Tests | Partial | Parser, HTTP/1.1 session/framing, HTTP/1.1 network integration including request-smuggling rejection, response serializer, handler pipeline, SQLite config, CLI config, protocol capability, HTTP/2 wire, HTTP/3 wire, virtual host, and WAF tests. |
+| Tests | Partial | Parser, HTTP/1.1 session/framing, HTTP/1.1 network integration including request-smuggling rejection, rate limiting, connection limits, and request/header/body/idle timeout slow-client behavior, response serializer, handler pipeline, SQLite config, CLI config, protocol capability, HTTP/2 wire, HTTP/3 wire, virtual host, and WAF tests. |
 | Deployment | Planned | No production deployment files. |
 | Database | Partial | SQLite is used for runtime configuration only; the SQLite engine is bundled static and config schema version `1` is recorded. |
 | I/O model | Partial | Linux `epoll` reactor with per-worker event loops and SO_REUSEPORT implemented; benchmarks still pending. |
 
 ## Last Validation
 
-Completed on 2026-07-18:
+Most recent completed on 2026-07-20:
+
+```bash
+ctest --test-dir build --output-on-failure -R rimau_http1_network
+ctest --test-dir build --output-on-failure
+```
+
+Result:
+
+- HTTP/1.1 network integration test passed, 1/1 test.
+- Full CTest passed, 12/12 tests.
+
+Historical baseline completed on 2026-07-18:
 
 ```bash
 cmake -S . -B build
@@ -1398,6 +1410,25 @@ Phase 2 request-smuggling integration test update:
 - Marked the Phase 2 request-smuggling integration checklist item complete in `docs/plans/021-ordered-update-checklist.md`.
 
 Validation on 2026-07-20 after request-smuggling integration test update:
+
+```bash
+ctest --test-dir build --output-on-failure -R rimau_http1_network
+ctest --test-dir build --output-on-failure
+```
+
+Result:
+
+- HTTP/1.1 network integration test passed, 1/1 test.
+- Full CTest passed, 12/12 tests.
+
+Phase 2 runtime security integration test update:
+
+- Added HTTP/1.1 network integration coverage for per-IP fixed-window rate limiting.
+- Added end-to-end coverage for per-IP connection limit and global connection limit rejection behavior.
+- Added request timeout, header timeout, body timeout, and idle timeout network coverage, including slow-client incomplete-header and incomplete-body behavior using SQLite-configured one-second limits.
+- Marked the Phase 2 rate limit, connection limit, timeout, and slow-client integration checklist item complete in `docs/plans/021-ordered-update-checklist.md`.
+
+Validation on 2026-07-20 after runtime security integration test update:
 
 ```bash
 ctest --test-dir build --output-on-failure -R rimau_http1_network

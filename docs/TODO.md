@@ -19,7 +19,6 @@
 - Revisit Brotli only if a bundled dependency and deployment approach are accepted; P1 decision is to defer Brotli.
 - Add WebSocket application routing, fragmentation support, subprotocol negotiation, extension policy, frame-aware proxy limits, and backpressure policy.
 - Add structured JSON parser/serializer integration if application routing needs JSON DOM access. Needs verification.
-- Add automated network integration tests for request/header/body/idle timeout and slow-client behavior.
 - Add adaptive slow-client protection beyond fixed timeout. Needs verification.
 - Add graceful shutdown integration tests for active/idle connections.
 - Add access log format.
@@ -65,7 +64,6 @@
 - Add per-virtual-host WAF enable/disable, anomaly threshold, and rule exception controls if required. Needs verification.
 - Add structured WAF audit log format and persistence policy. Needs verification.
 - Add ModSecurity rule syntax/parser support only if full compatibility is accepted. Needs verification.
-- Add CTest or integration harness for rate limiting and connection limiting.
 - Add CTest or integration harness for IPv6 listener and IPv6 allowlist/blocklist behavior.
 - Add support for arbitrary custom security header names if the fixed built-in set is not enough. Needs verification.
 - Add token-bucket or leaky-bucket rate limiting if fixed-window behavior is too bursty. Needs verification.

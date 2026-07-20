@@ -65,8 +65,9 @@ Untuk setiap item:
 - [x] Tambah WAF integration tests untuk HTTP/1.1, WebSocket upgrade, WebSocket proxy upgrade, dan partial HTTP/2.
   - Done criteria: WAF block path diuji di semua entry point.
   - Status: HTTP/1.1 network integration now enables the built-in WAF and verifies blocking for normal HTTP/1.1, local WebSocket upgrade, WebSocket proxy vhost upgrade, and partial h2c request-serving paths.
-- [ ] Bina WAF false-positive regression corpus.
+- [x] Bina WAF false-positive regression corpus.
   - Done criteria: traffic normal browser/curl tidak diblock oleh rule default.
+  - Status: `rimau_waf` now includes a structured false-positive corpus for normal curl, browser navigation/static asset, search, JSON API, form, and WebSocket upgrade traffic; each case must stay allowed with no WAF matches under default blocking WAF settings.
 - [ ] Decide full `libmodsecurity` + full OWASP CRS atau kekal Rimau-native WAF.
   - Done criteria: ADR accepted dengan source/version/license/build plan atau keputusan untuk tidak bundle.
 - [ ] Tambah per-virtual-host WAF controls jika diperlukan.

@@ -83,7 +83,7 @@ Implemented:
 - Partial HTTP/2 TLS ALPN `h2` request serving using the same preface, SETTINGS, HEADERS/DATA, shared handler pipeline, and HTTP/2 response serialization path.
 - HTTP/3 QUIC varint parser/serializer.
 - HTTP/3 frame parser/serializer and SETTINGS payload codec.
-- WAF unit test melalui CTest.
+- WAF unit test dan false-positive regression corpus melalui CTest.
 - Basic HTTP request parser.
 - Basic HTTP response serializer.
 - Response serializer support for caller-controlled `Connection` headers.
@@ -152,7 +152,7 @@ Semasa pemeriksaan awal pada 2026-07-18:
 | Request pipeline | Partial | Handler/factory/transaction/response sink implemented for static, vhost, reverse proxy, and script-placeholder HTTP/1.1. |
 | Config | Partial | SQLite table `rimau_config`, schema metadata table `rimau_schema_migrations`, protocol, TLS, keep-alive, static file, timeout, rate-limit, IP-list, security-header, virtual-host/proxy keys, and limited SIGHUP reload behavior. |
 | Security | Partial | Baseline HTTP framing hardening, timeout, rate limit, connection limit, built-in ModSecurity-compatible WAF subset, configurable security header values, and IPv4/IPv6 IP allow/block list are implemented; fuzzing, full ModSecurity/CRS integration, and production hardening remain pending. |
-| Tests | Partial | Parser, HTTP/1.1 session/framing, HTTP/1.1 network integration including request-smuggling rejection, rate limiting, connection limits, request/header/body/idle timeout slow-client behavior, and WAF block paths for HTTP/1.1/WebSocket/WebSocket proxy/partial HTTP/2, response serializer, handler pipeline, SQLite config, CLI config, protocol capability, HTTP/2 wire, HTTP/3 wire, virtual host, and WAF tests. |
+| Tests | Partial | Parser, HTTP/1.1 session/framing, HTTP/1.1 network integration including request-smuggling rejection, rate limiting, connection limits, request/header/body/idle timeout slow-client behavior, and WAF block paths for HTTP/1.1/WebSocket/WebSocket proxy/partial HTTP/2, WAF false-positive corpus, response serializer, handler pipeline, SQLite config, CLI config, protocol capability, HTTP/2 wire, HTTP/3 wire, virtual host, and WAF tests. |
 | Deployment | Planned | No production deployment files. |
 | Database | Partial | SQLite is used for runtime configuration only; the SQLite engine is bundled static and config schema version `1` is recorded. |
 | I/O model | Partial | Linux `epoll` reactor with per-worker event loops and SO_REUSEPORT implemented; benchmarks still pending. |
@@ -162,15 +162,15 @@ Semasa pemeriksaan awal pada 2026-07-18:
 Most recent completed on 2026-07-20:
 
 ```bash
-python3 -m py_compile tests/test_http1_network.py
-ctest --test-dir build --output-on-failure -R rimau_http1_network
+cmake --build build --target rimau-waf-tests
+ctest --test-dir build --output-on-failure -R rimau_waf
 ctest --test-dir build --output-on-failure
 ```
 
 Result:
 
-- Python syntax check passed.
-- HTTP/1.1 network integration test passed, 1/1 test.
+- WAF test target built.
+- `rimau_waf` passed, 1/1 test.
 - Full CTest passed, 12/12 tests.
 
 Historical baseline completed on 2026-07-18:
@@ -1462,4 +1462,26 @@ Result:
 
 - Python syntax check passed.
 - HTTP/1.1 network integration test passed, 1/1 test.
+- Full CTest passed, 12/12 tests.
+
+Phase 2 WAF false-positive corpus update:
+
+- Added a structured false-positive regression corpus to `tests/test_waf.cpp`.
+- Corpus entries parse realistic raw HTTP requests through the project parser before WAF inspection.
+- Covered normal curl `Accept: */*`, browser document navigation, browser static asset fetch, normal search query, JSON API POST, form submission, and WebSocket upgrade traffic.
+- Each corpus entry enables default blocking WAF settings and asserts it is inspected, allowed, and produces no WAF matches.
+- Marked the Phase 2 WAF false-positive corpus checklist item complete in `docs/plans/021-ordered-update-checklist.md`.
+
+Validation on 2026-07-20 after WAF false-positive corpus update:
+
+```bash
+cmake --build build --target rimau-waf-tests
+ctest --test-dir build --output-on-failure -R rimau_waf
+ctest --test-dir build --output-on-failure
+```
+
+Result:
+
+- WAF test target built.
+- `rimau_waf` passed, 1/1 test.
 - Full CTest passed, 12/12 tests.

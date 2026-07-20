@@ -29,7 +29,7 @@ Untuk setiap item:
   - Status: tunggu push/PR dan GitHub Actions run pertama lulus sebelum tanda `[x]`.
 - [x] Tambah SQLite schema migration/version table.
   - Done criteria: config database mempunyai versioning dan test migration.
-- [ ] Tambah CLI integration tests untuk `--database`, `--set`, `--check-config`, dan `--protocols`.
+- [x] Tambah CLI integration tests untuk `--database`, `--set`, `--check-config`, dan `--protocols`.
   - Done criteria: test gagal jika config SQLite tidak bootstrap/update dengan betul.
 
 ## Phase 1: HTTP/1.1 Stabilization

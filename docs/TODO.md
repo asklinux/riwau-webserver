@@ -6,8 +6,6 @@
 - Add parser tests for malformed request lines, duplicate headers, long headers, and path traversal cases.
 - Add response tests for GET, HEAD, 404, 403, 405, and MIME types.
 - Add multi-step SQLite migration framework, downgrade policy, and backup/restore workflow beyond current schema version table.
-- Add tests for CLI `--set` and `--database`.
-- Add CLI integration tests for `--protocols` with SQLite protocol flags.
 - Verify first GitHub Actions CI run after `.github/workflows/ci.yml` is pushed. Needs verification.
 - Investigate GitHub Actions `startup_failure` runs that complete before any job or log is created. Needs verification.
 - Decide coding style and formatter. Needs verification.

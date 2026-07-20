@@ -378,6 +378,13 @@ if(RIMAU_ENABLE_TESTS)
     add_test(NAME rimau_http3_wire COMMAND rimau-http3-wire-tests)
     add_test(NAME rimau_virtual_host COMMAND rimau-virtual-host-tests)
     add_test(NAME rimau_waf COMMAND rimau-waf-tests)
+    add_test(
+        NAME rimau_cli_config
+        COMMAND
+            ${CMAKE_COMMAND}
+            "-DRIMAU_SERVER=$<TARGET_FILE:rimau-server>"
+            "-DRIMAU_TEST_DIR=${CMAKE_BINARY_DIR}/test-runtime"
+            -P "${CMAKE_SOURCE_DIR}/tests/test_cli_config.cmake")
 endif()
 
 install(TARGETS rimau-server RUNTIME DESTINATION bin)

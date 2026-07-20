@@ -114,6 +114,7 @@ Not present:
 |       |-- 018-http2-h2c-request-serving.md
 |       |-- 019-http2-tls-alpn-h2.md
 |       |-- 020-modsecurity-owasp-crs-built-in-waf.md
+|       |-- 021-ordered-update-checklist.md
 |       `-- README.md
 |-- include/
 |   `-- rimau/
@@ -133,6 +134,7 @@ Not present:
 |   |-- protocol/
 |   `-- main.cpp
 `-- tests/
+    |-- test_cli_config.cmake
     |-- test_config_database.cpp
     |-- test_handler_pipeline.cpp
     |-- test_http_parser.cpp
@@ -368,6 +370,7 @@ Production deployment, service manager, packaging, container, TLS certificate ha
 - Response serializer test asas melalui CTest.
 - Handler pipeline test asas melalui CTest.
 - SQLite config database test asas melalui CTest.
+- CLI integration test melalui CTest untuk `--database`, `--set`, `--check-config`, dan `--protocols`.
 - Protocol capability test asas melalui CTest.
 - Protocol status command.
 - SQLite protocol flags: `http1_enabled`, `http2_enabled`, dan `http3_enabled`.

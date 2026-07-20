@@ -89,6 +89,7 @@ Implemented:
 - Handler pipeline unit test melalui CTest.
 - Response serializer unit test melalui CTest.
 - SQLite config database unit test melalui CTest.
+- CLI integration test melalui CTest untuk `--database`, `--set`, `--check-config`, dan `--protocols`.
 - Protocol capability unit test melalui CTest.
 - Project-memory docs.
 
@@ -144,7 +145,7 @@ Semasa pemeriksaan awal pada 2026-07-18:
 | Request pipeline | Partial | Handler/factory/transaction/response sink implemented for static, vhost, reverse proxy, and script-placeholder HTTP/1.1. |
 | Config | Partial | SQLite table `rimau_config`, schema metadata table `rimau_schema_migrations`, protocol, TLS, keep-alive, timeout, rate-limit, IP-list, security-header, virtual-host/proxy keys, and limited SIGHUP reload behavior. |
 | Security | Partial | Baseline HTTP framing hardening, timeout, rate limit, connection limit, built-in ModSecurity-compatible WAF subset, configurable security header values, and IPv4/IPv6 IP allow/block list are implemented; fuzzing, full ModSecurity/CRS integration, and production hardening remain pending. |
-| Tests | Partial | Parser, response serializer, handler pipeline, SQLite config, protocol capability, HTTP/2 wire, HTTP/3 wire, virtual host, and WAF tests. |
+| Tests | Partial | Parser, response serializer, handler pipeline, SQLite config, CLI config, protocol capability, HTTP/2 wire, HTTP/3 wire, virtual host, and WAF tests. |
 | Deployment | Planned | No production deployment files. |
 | Database | Partial | SQLite is used for runtime configuration only; the SQLite engine is bundled static and config schema version `1` is recorded. |
 | I/O model | Partial | Linux `epoll` reactor with per-worker event loops and SO_REUSEPORT implemented; benchmarks still pending. |
@@ -1140,3 +1141,27 @@ License status documentation update:
 - Verified that the root `LICENSE` file contains GNU GPL version 3 text.
 - Added ADR-0028 with status `Needs verification` because the repository file exists, but the project owner has not explicitly confirmed GPL-3.0 as the intended final Rimau Web Server license in project docs.
 - Marked the license checklist item complete because the status is now documented as required by `docs/plans/021-ordered-update-checklist.md`.
+
+CLI integration test update:
+
+- Added CTest script `tests/test_cli_config.cmake`.
+- Added CTest case `rimau_cli_config`.
+- The test creates a temporary SQLite database through `rimau-server --database ... --check-config`.
+- The test verifies `--set` persists config values, `--check-config` reads them back, `--protocols` reflects SQLite protocol flags, and invalid `--set port=70000` returns a failure with the expected validation error.
+- Marked the CLI integration checklist item complete in `docs/plans/021-ordered-update-checklist.md`.
+
+Validation on 2026-07-20 after CLI integration test update:
+
+```bash
+cmake -S . -B build
+cmake --build build
+ctest --test-dir build --output-on-failure -R rimau_cli_config
+ctest --test-dir build --output-on-failure
+```
+
+Result:
+
+- CMake configure passed.
+- Build passed.
+- `rimau_cli_config` passed.
+- CTest passed, 10/10 tests.

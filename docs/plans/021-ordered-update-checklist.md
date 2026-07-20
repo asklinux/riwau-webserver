@@ -24,9 +24,9 @@ Untuk setiap item:
   - Status: `LICENSE` contains GPL-3.0 text; ADR-0028 records final owner intent as `Needs verification`.
 - [x] Tambah CI workflow file.
   - Done criteria: `.github/workflows/ci.yml` wujud dan local CMake configure dengan flag CI lulus.
-- [ ] Verify first GitHub Actions CI run.
+- [x] Verify first GitHub Actions CI run.
   - Done criteria: GitHub Actions build CMake dan run CTest untuk PR/push selepas workflow dipush.
-  - Status: run `29716825738` reached hosted runner but failed because bundled glibc was still scheduled in the fast CI build; CMake now excludes glibc-related ExternalProject targets from default `all`. Run `29717365733` then failed on GCC/libstdc++ 11 `std::atomic<std::shared_ptr<...>>`; runtime config/TLS publication now uses atomic shared_ptr free functions. Wait for the next pushed GitHub Actions run to pass before marking `[x]`.
+  - Status: GitHub Actions run `29717795357` passed on 2026-07-20 after fixing fast-CI glibc scheduling and GCC 11 shared_ptr atomic portability.
 - [x] Tambah SQLite schema migration/version table.
   - Done criteria: config database mempunyai versioning dan test migration.
 - [x] Tambah CLI integration tests untuk `--database`, `--set`, `--check-config`, dan `--protocols`.

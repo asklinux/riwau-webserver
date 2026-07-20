@@ -1310,3 +1310,9 @@ Result:
 - GCC 11 fast-path configure passed.
 - GCC 11 built `rimau_core` successfully.
 - Full default CTest passed, 12/12 tests.
+
+GitHub Actions CI verification:
+
+- GitHub Actions run `29717795357` for commit `d978384` passed on 2026-07-20.
+- This verifies the pushed workflow can configure, build, run CTest, and run CLI smoke in the repository's Ubuntu 22.04 fast path.
+- Marked the first CI verification item complete in `docs/plans/021-ordered-update-checklist.md`.

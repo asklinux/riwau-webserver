@@ -274,6 +274,7 @@ add_library(rimau_core
     src/core/config.cpp
     src/core/logger.cpp
     src/core/server.cpp
+    src/http/http1_session.cpp
     src/http/parser.cpp
     src/http/response_builder.cpp
     src/http/response.cpp
@@ -345,6 +346,10 @@ if(RIMAU_ENABLE_TESTS)
         tests/test_http_response.cpp)
     target_link_libraries(rimau-http-response-tests PRIVATE rimau_core)
 
+    add_executable(rimau-http1-session-tests
+        tests/test_http1_session.cpp)
+    target_link_libraries(rimau-http1-session-tests PRIVATE rimau_core)
+
     add_executable(rimau-config-database-tests
         tests/test_config_database.cpp)
     target_link_libraries(rimau-config-database-tests PRIVATE rimau_core)
@@ -372,6 +377,7 @@ if(RIMAU_ENABLE_TESTS)
     add_test(NAME rimau_http_parser COMMAND rimau-http-parser-tests)
     add_test(NAME rimau_handler_pipeline COMMAND rimau-handler-pipeline-tests)
     add_test(NAME rimau_http_response COMMAND rimau-http-response-tests)
+    add_test(NAME rimau_http1_session COMMAND rimau-http1-session-tests)
     add_test(NAME rimau_config_database COMMAND rimau-config-database-tests)
     add_test(NAME rimau_protocol_capabilities COMMAND rimau-protocol-capabilities-tests)
     add_test(NAME rimau_http2_wire COMMAND rimau-http2-wire-tests)

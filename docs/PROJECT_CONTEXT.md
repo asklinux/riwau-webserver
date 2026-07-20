@@ -137,6 +137,7 @@ Not present:
     |-- test_cli_config.cmake
     |-- test_config_database.cpp
     |-- test_handler_pipeline.cpp
+    |-- test_http1_session.cpp
     |-- test_http_parser.cpp
     |-- test_http2_wire.cpp
     |-- test_http3_wire.cpp
@@ -154,6 +155,7 @@ Not present:
 - `rimau::core::config_schema_version`: Bootstrap metadata SQLite dan laporkan versi skema config semasa.
 - `rimau::core::set_config_value`: Tulis nilai config disokong ke SQLite.
 - `rimau::core::Server`: Mencipta dan reload TLS context termasuk SNI certificate contexts apabila `tls_enabled=true`.
+- `rimau::http::next_http1_request_frame`: HTTP/1.1 buffered framing untuk headers, `Content-Length`, chunked transfer decoding, request pipelining boundary, dan framing error tanpa socket event loop.
 - `rimau::http::parse_request`: Parser asas HTTP/1.0 dan HTTP/1.1 untuk request line, headers, URL-decoded path, query params, dan buffered body.
 - `rimau::http::file_response`: Static file response untuk GET dan HEAD, termasuk MIME type, single range, dan gzip untuk content compressible.
 - `rimau::http::RequestHandler`: Interface untuk logic request per transaction.
@@ -369,6 +371,7 @@ Production deployment, service manager, packaging, container, TLS certificate ha
 - Parser test asas melalui CTest.
 - Response serializer test asas melalui CTest.
 - Handler pipeline test asas melalui CTest.
+- HTTP/1.1 session/framing test melalui CTest tanpa socket event loop.
 - SQLite config database test asas melalui CTest.
 - CLI integration test melalui CTest untuk `--database`, `--set`, `--check-config`, dan `--protocols`.
 - Protocol capability test asas melalui CTest.

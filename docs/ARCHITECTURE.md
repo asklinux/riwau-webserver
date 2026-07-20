@@ -27,7 +27,7 @@ main()
   -> enforce request/header/body/idle timeouts
   -> if cleartext HTTP/2 preface or TLS ALPN h2 preface and http2_enabled=true: parse SETTINGS, write SETTINGS + SETTINGS ACK, then process HTTP/2 HEADERS/DATA frames
   -> for complete HTTP/2 streams: decode HPACK baseline headers, build Request, dispatch through Transaction, serialize response as HTTP/2 HEADERS/DATA frames
-  -> detect complete HTTP message through headers, Content-Length, or chunked transfer decoding
+  -> detect complete HTTP/1.1 message through rimau::http::next_http1_request_frame headers, Content-Length, or chunked transfer decoding
   -> reject invalid HTTP framing and request-smuggling patterns
   -> parse_request()
   -> if WebSocket Upgrade matches proxy vhost: connect upstream, validate upstream 101, then tunnel client/upstream via same worker epoll reactor
@@ -82,7 +82,7 @@ Location:
 Responsibility:
 
 - Request representation
-- Header parsing
+- HTTP/1.1 request header parsing and buffered message framing
 - Response serialization
 - Static file response
 - Basic MIME detection
@@ -96,6 +96,7 @@ Responsibility:
 
 Important files:
 
+- `src/http/http1_session.cpp`
 - `src/http/parser.cpp`
 - `src/http/response.cpp`
 - `src/http/response_builder.cpp`

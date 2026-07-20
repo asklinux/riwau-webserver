@@ -69,6 +69,7 @@ Implemented:
 - TCP keepalive on accepted client sockets.
 - Per-worker connection object pool for connection/buffer reuse.
 - HTTP/1.1 persistent connections, keep-alive, and basic request pipelining.
+- HTTP/1.1 buffered request framing extracted from `ClientConnection` into `rimau::http::next_http1_request_frame`.
 - SIGTERM/SIGINT graceful shutdown and limited SIGHUP live reload.
 - SQLite protocol flags for `http1_enabled`, `http2_enabled`, and `http3_enabled`.
 - Config-aware protocol capability reporting.
@@ -88,6 +89,7 @@ Implemented:
 - Parser unit test melalui CTest.
 - Handler pipeline unit test melalui CTest.
 - Response serializer unit test melalui CTest.
+- HTTP/1.1 session/framing unit test melalui CTest.
 - SQLite config database unit test melalui CTest.
 - CLI integration test melalui CTest untuk `--database`, `--set`, `--check-config`, dan `--protocols`.
 - Protocol capability unit test melalui CTest.
@@ -134,7 +136,7 @@ Semasa pemeriksaan awal pada 2026-07-18:
 | --- | --- | --- |
 | Build system | Implemented | CMake with bundled static OpenSSL, SQLite, zlib, Bison, Linux UAPI headers, and glibc targets; `rimau-server` is fully static in current Linux x86_64 validation. |
 | CLI | Partial | `--database`, `--set`, `--check-config`, `--protocols`, `--version`, `--help`. |
-| HTTP/1.1 | Partial | GET/HEAD static, POST/PUT/PATCH/DELETE JSON scaffold, OPTIONS, Content-Length, chunked decode, keep-alive, basic pipelining, range, gzip, WebSocket echo, and WebSocket reverse proxy tunnel. |
+| HTTP/1.1 | Partial | GET/HEAD static, POST/PUT/PATCH/DELETE JSON scaffold, OPTIONS, Content-Length, chunked decode, keep-alive, basic pipelining, range, gzip, WebSocket echo, WebSocket reverse proxy tunnel, and extracted testable request framing. |
 | HTTP/2 | Partial | Frame codec, SETTINGS/PING basics, HPACK baseline, cleartext h2c and TLS ALPN `h2` HEADERS/DATA request serving through the shared handler pipeline exist; no production flow control, CONTINUATION assembly, HPACK Huffman, or dynamic-table persistence yet. |
 | HTTP/3 | Partial | QUIC varint, frame codec, and SETTINGS codec exist; no UDP/QUIC/QPACK/live serving yet. |
 | TLS | Partial | HTTP/1.1 HTTPS and partial HTTP/2 ALPN `h2` via bundled static OpenSSL 4.0.1 with TLS 1.2/1.3, SNI validation, multi-certificate SNI selection, ALPN `http/1.1`/`h2`, safe cipher config, and SIGHUP context reload for new connections. |
@@ -145,7 +147,7 @@ Semasa pemeriksaan awal pada 2026-07-18:
 | Request pipeline | Partial | Handler/factory/transaction/response sink implemented for static, vhost, reverse proxy, and script-placeholder HTTP/1.1. |
 | Config | Partial | SQLite table `rimau_config`, schema metadata table `rimau_schema_migrations`, protocol, TLS, keep-alive, timeout, rate-limit, IP-list, security-header, virtual-host/proxy keys, and limited SIGHUP reload behavior. |
 | Security | Partial | Baseline HTTP framing hardening, timeout, rate limit, connection limit, built-in ModSecurity-compatible WAF subset, configurable security header values, and IPv4/IPv6 IP allow/block list are implemented; fuzzing, full ModSecurity/CRS integration, and production hardening remain pending. |
-| Tests | Partial | Parser, response serializer, handler pipeline, SQLite config, CLI config, protocol capability, HTTP/2 wire, HTTP/3 wire, virtual host, and WAF tests. |
+| Tests | Partial | Parser, HTTP/1.1 session/framing, response serializer, handler pipeline, SQLite config, CLI config, protocol capability, HTTP/2 wire, HTTP/3 wire, virtual host, and WAF tests. |
 | Deployment | Planned | No production deployment files. |
 | Database | Partial | SQLite is used for runtime configuration only; the SQLite engine is bundled static and config schema version `1` is recorded. |
 | I/O model | Partial | Linux `epoll` reactor with per-worker event loops and SO_REUSEPORT implemented; benchmarks still pending. |
@@ -1165,3 +1167,27 @@ Result:
 - Build passed.
 - `rimau_cli_config` passed.
 - CTest passed, 10/10 tests.
+
+HTTP/1.1 session extraction update:
+
+- Added `include/rimau/http/http1_session.hpp` and `src/http/http1_session.cpp`.
+- Added `rimau::http::next_http1_request_frame` to classify HTTP/1.1 buffered input as incomplete, header-complete/body-waiting, complete, or framing error.
+- The new module owns HTTP/1.1 header framing validation, invalid `Content-Length` and `Transfer-Encoding` rejection, `Content-Length` body boundary detection, chunked body decoding, request size enforcement, and pipelining consumption length.
+- `ClientConnection::process_buffered_request` now delegates HTTP/1.1 frame detection to this module before applying WebSocket, WAF, rate-limit, transaction dispatch, and keep-alive response behavior.
+- Added CTest target `rimau_http1_session` so HTTP/1.1 parsing/framing can be tested without socket or `epoll`.
+- Marked the first Phase 1 checklist item complete in `docs/plans/021-ordered-update-checklist.md`.
+
+Validation on 2026-07-20 after HTTP/1.1 session extraction:
+
+```bash
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
+
+Manual Python socket smoke started `rimau-server` with a temporary SQLite database on `127.0.0.1:18182`, sent two pipelined `GET /` requests over one socket, and required two `HTTP/1.1 200 OK` responses.
+
+Result:
+
+- Build passed; static glibc DNS/NSS linker warnings for `getaddrinfo`/OpenSSL `gethostbyname` remain.
+- CTest passed, 11/11 tests.
+- Pipelined HTTP/1.1 keep-alive smoke passed.

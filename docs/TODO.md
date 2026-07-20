@@ -13,7 +13,6 @@
 
 ## P1 - HTTP/1.1 Completion
 
-- Add protocol-level HTTP/1.1 codec abstraction separate from the current `ClientConnection` event-loop state.
 - Add transaction IDs that are unique per connection/session.
 - Add integration tests for HTTP/1.1 keep-alive, max request cap, idle timeout, request pipelining, chunked bodies, range responses, gzip responses, WebSocket echo, and WebSocket reverse proxy tunneling.
 - Add integration tests for virtual host routing, fallback host behavior, reverse proxy success/failure, WebSocket proxy HTTP/HTTPS upstream behavior, and script-placeholder 501 behavior.

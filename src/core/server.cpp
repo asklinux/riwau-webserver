@@ -1,6 +1,7 @@
 #include "rimau/core/server.hpp"
 
 #include "rimau/core/logger.hpp"
+#include "rimau/http/http1_session.hpp"
 #include "rimau/http/parser.hpp"
 #include "rimau/http/response.hpp"
 #include "rimau/http/response_sink.hpp"
@@ -385,219 +386,6 @@ std::optional<std::size_t> parse_decimal_size(std::string_view value)
         parsed = parsed * 10 + digit;
     }
     return parsed;
-}
-
-struct HeaderFrameAnalysis {
-    bool ok = true;
-    bool chunked = false;
-    std::optional<std::size_t> content_length;
-    int status = 400;
-    std::string message = "Bad Request\n";
-};
-
-HeaderFrameAnalysis bad_header_frame(int status, std::string message)
-{
-    HeaderFrameAnalysis analysis;
-    analysis.ok = false;
-    analysis.status = status;
-    analysis.message = std::move(message);
-    return analysis;
-}
-
-HeaderFrameAnalysis analyze_header_frame(std::string_view raw_header)
-{
-    HeaderFrameAnalysis analysis;
-    std::vector<std::string> content_lengths;
-    std::vector<std::string> transfer_encodings;
-
-    for (std::size_t index = 0; index < raw_header.size(); ++index) {
-        const unsigned char ch = static_cast<unsigned char>(raw_header[index]);
-        if (ch == '\n' && (index == 0 || raw_header[index - 1] != '\r')) {
-            return bad_header_frame(400, "Bad Request\n");
-        }
-        if (ch == '\r' && (index + 1 >= raw_header.size() || raw_header[index + 1] != '\n')) {
-            return bad_header_frame(400, "Bad Request\n");
-        }
-        if (ch == '\r' || ch == '\n' || ch == '\t') {
-            continue;
-        }
-        if (ch < 0x20 || ch == 0x7f) {
-            return bad_header_frame(400, "Bad Request\n");
-        }
-    }
-
-    std::size_t line_start = 0;
-    bool first_line = true;
-    while (line_start < raw_header.size()) {
-        const auto line_end = raw_header.find("\r\n", line_start);
-        if (line_end == std::string_view::npos) {
-            return bad_header_frame(400, "Bad Request\n");
-        }
-
-        const auto line = raw_header.substr(line_start, line_end - line_start);
-        line_start = line_end + 2;
-
-        if (line.empty()) {
-            break;
-        }
-
-        if (first_line) {
-            first_line = false;
-            continue;
-        }
-
-        if (line.front() == ' ' || line.front() == '\t') {
-            return bad_header_frame(400, "Bad Request\n");
-        }
-
-        const auto separator = line.find(':');
-        if (separator == std::string_view::npos) {
-            return bad_header_frame(400, "Bad Request\n");
-        }
-
-        const auto raw_name = line.substr(0, separator);
-        if (!valid_header_name(raw_name)) {
-            return bad_header_frame(400, "Bad Request\n");
-        }
-
-        std::string name = lowercase(std::string(raw_name));
-        std::string value = trim(std::string(line.substr(separator + 1)));
-        for (const unsigned char ch : value) {
-            if (ch != '\t' && (ch < 0x20 || ch == 0x7f)) {
-                return bad_header_frame(400, "Bad Request\n");
-            }
-        }
-
-        if (name == "content-length") {
-            content_lengths.push_back(std::move(value));
-        } else if (name == "transfer-encoding") {
-            transfer_encodings.push_back(std::move(value));
-        }
-    }
-
-    if (content_lengths.size() > 1) {
-        return bad_header_frame(400, "Bad Request\n");
-    }
-
-    if (!content_lengths.empty()) {
-        const auto length = parse_decimal_size(trim(content_lengths.front()));
-        if (!length) {
-            return bad_header_frame(400, "Bad Request\n");
-        }
-        analysis.content_length = *length;
-    }
-
-    if (transfer_encodings.size() > 1) {
-        return bad_header_frame(400, "Bad Request\n");
-    }
-
-    if (!transfer_encodings.empty()) {
-        const auto encodings = split_csv(transfer_encodings.front());
-        if (encodings.size() != 1 || lowercase(encodings.front()) != "chunked") {
-            return bad_header_frame(400, "Bad Request\n");
-        }
-        if (analysis.content_length) {
-            return bad_header_frame(400, "Bad Request\n");
-        }
-        analysis.chunked = true;
-    }
-
-    return analysis;
-}
-
-enum class ChunkedDecodeState {
-    incomplete,
-    complete,
-    malformed
-};
-
-struct ChunkedDecodeResult {
-    ChunkedDecodeState state = ChunkedDecodeState::incomplete;
-    std::string body;
-    std::size_t consumed = 0;
-};
-
-std::optional<std::size_t> parse_hex_size(std::string_view value)
-{
-    if (value.empty()) {
-        return std::nullopt;
-    }
-
-    std::size_t parsed = 0;
-    for (const char ch : value) {
-        int digit = -1;
-        if (ch >= '0' && ch <= '9') {
-            digit = ch - '0';
-        } else if (ch >= 'a' && ch <= 'f') {
-            digit = 10 + ch - 'a';
-        } else if (ch >= 'A' && ch <= 'F') {
-            digit = 10 + ch - 'A';
-        } else {
-            return std::nullopt;
-        }
-
-        if (parsed > (std::numeric_limits<std::size_t>::max() - static_cast<std::size_t>(digit)) / 16) {
-            return std::nullopt;
-        }
-        parsed = parsed * 16 + static_cast<std::size_t>(digit);
-    }
-
-    return parsed;
-}
-
-ChunkedDecodeResult decode_chunked_body(std::string_view encoded)
-{
-    ChunkedDecodeResult result;
-    std::size_t cursor = 0;
-
-    while (true) {
-        const auto line_end = encoded.find("\r\n", cursor);
-        if (line_end == std::string_view::npos) {
-            return result;
-        }
-
-        auto size_line = encoded.substr(cursor, line_end - cursor);
-        const auto extension = size_line.find(';');
-        if (extension != std::string_view::npos) {
-            size_line = size_line.substr(0, extension);
-        }
-
-        const auto chunk_size = parse_hex_size(trim(std::string(size_line)));
-        if (!chunk_size) {
-            result.state = ChunkedDecodeState::malformed;
-            return result;
-        }
-
-        cursor = line_end + 2;
-        if (*chunk_size == 0) {
-            while (true) {
-                const auto trailer_end = encoded.find("\r\n", cursor);
-                if (trailer_end == std::string_view::npos) {
-                    result.state = ChunkedDecodeState::incomplete;
-                    return result;
-                }
-                if (trailer_end == cursor) {
-                    result.state = ChunkedDecodeState::complete;
-                    result.consumed = trailer_end + 2;
-                    return result;
-                }
-                cursor = trailer_end + 2;
-            }
-        }
-
-        if (encoded.size() < cursor + *chunk_size + 2) {
-            return result;
-        }
-
-        result.body.append(encoded.substr(cursor, *chunk_size));
-        cursor += *chunk_size;
-        if (encoded.substr(cursor, 2) != "\r\n") {
-            result.state = ChunkedDecodeState::malformed;
-            return result;
-        }
-        cursor += 2;
-
-    }
 }
 
 std::string base64_encode(const unsigned char* data, std::size_t size)
@@ -2611,109 +2399,66 @@ private:
             return;
         }
 
-        const auto header_end = request_buffer_.find("\r\n\r\n");
-        if (header_end == std::string::npos) {
-            if (request_buffer_.size() > config_->max_request_bytes) {
-                set_response(rimau::http::text_response(431, "Request Header Fields Too Large\n"), rimau::http::BodyMode::include, false);
-            }
+        const auto frame = rimau::http::next_http1_request_frame(
+            request_buffer_,
+            rimau::http::Http1FrameOptions { config_->max_request_bytes });
+
+        if (frame.state == rimau::http::Http1FrameState::incomplete) {
+            waiting_for_body_ = frame.waiting_for_body;
             return;
         }
 
-        const std::size_t body_start = header_end + 4;
-        const auto frame_analysis = analyze_header_frame(std::string_view(request_buffer_).substr(0, body_start));
-        if (!frame_analysis.ok) {
-            request_buffer_.erase(0, body_start);
-            set_response(rimau::http::text_response(frame_analysis.status, frame_analysis.message), rimau::http::BodyMode::include, false);
-            return;
-        }
-
-        if (body_start > config_->max_request_bytes) {
-            request_buffer_.erase(0, body_start);
-            set_response(rimau::http::text_response(431, "Request Header Fields Too Large\n"), rimau::http::BodyMode::include, false);
-            return;
-        }
-
-        const auto header_parse = rimau::http::parse_request(std::string_view(request_buffer_).substr(0, body_start));
-        if (!header_parse) {
-            request_buffer_.erase(0, body_start);
-            set_response(rimau::http::text_response(400, "Bad Request\n"), rimau::http::BodyMode::include, false);
-            return;
-        }
-
-        if (is_websocket_upgrade_request(*header_parse.request)) {
-            request_buffer_.erase(0, body_start);
-            request_started_at_ = request_buffer_.empty() ? std::chrono::steady_clock::time_point {} : std::chrono::steady_clock::now();
-            if (security_state_ && !security_state_->allow_request(client_ip_, *config_)) {
-                set_response(rimau::http::text_response(429, "Too Many Requests\n"), rimau::http::BodyMode::include, false);
-                return;
-            }
-            if (auto waf_response = inspect_waf(*header_parse.request)) {
-                set_response(std::move(*waf_response), rimau::http::BodyMode::include, false);
-                return;
-            }
-            if (try_start_websocket_proxy(*header_parse.request)) {
-                return;
-            }
-            ++requests_served_;
-            set_websocket_handshake_response(websocket_handshake_response(*header_parse.request));
-            return;
-        }
-
-        std::string raw_request;
-        if (frame_analysis.chunked) {
-            const auto decoded = decode_chunked_body(std::string_view(request_buffer_).substr(body_start));
-            if (decoded.state == ChunkedDecodeState::incomplete) {
-                waiting_for_body_ = true;
-                if (body_started_at_.time_since_epoch().count() == 0) {
-                    body_started_at_ = std::chrono::steady_clock::now();
-                }
-                if (request_buffer_.size() > config_->max_request_bytes) {
-                    request_buffer_.clear();
-                    set_response(rimau::http::text_response(413, "Content Too Large\n"), rimau::http::BodyMode::include, false);
-                }
-                return;
-            }
-            if (decoded.state == ChunkedDecodeState::malformed || body_start + decoded.consumed > config_->max_request_bytes) {
-                request_buffer_.erase(0, std::min(request_buffer_.size(), body_start + decoded.consumed));
-                set_response(rimau::http::text_response(400, "Bad Request\n"), rimau::http::BodyMode::include, false);
-                return;
-            }
-
-            raw_request = request_buffer_.substr(0, body_start);
-            raw_request += decoded.body;
-            request_buffer_.erase(0, body_start + decoded.consumed);
-            waiting_for_body_ = false;
-            body_started_at_ = {};
-        } else {
-            std::size_t body_size = frame_analysis.content_length.value_or(0);
-
-            if (body_start + body_size > config_->max_request_bytes) {
+        if (frame.state == rimau::http::Http1FrameState::error) {
+            if (frame.discard_buffer) {
                 request_buffer_.clear();
-                set_response(rimau::http::text_response(413, "Content Too Large\n"), rimau::http::BodyMode::include, false);
-                return;
+            } else if (frame.consumed > 0) {
+                request_buffer_.erase(0, std::min(request_buffer_.size(), frame.consumed));
             }
-
-            if (request_buffer_.size() < body_start + body_size) {
-                waiting_for_body_ = body_size > 0;
-                if (waiting_for_body_ && body_started_at_.time_since_epoch().count() == 0) {
-                    body_started_at_ = std::chrono::steady_clock::now();
-                }
-                return;
-            }
-
-            raw_request = request_buffer_.substr(0, body_start + body_size);
-            request_buffer_.erase(0, body_start + body_size);
-            waiting_for_body_ = false;
-            body_started_at_ = {};
-        }
-
-        if (raw_request.size() > config_->max_request_bytes) {
-            set_response(rimau::http::text_response(413, "Content Too Large\n"), rimau::http::BodyMode::include, false);
+            set_response(rimau::http::text_response(frame.error_status, frame.error_message), rimau::http::BodyMode::include, false);
             return;
         }
 
+        if (frame.request && try_handle_websocket_upgrade(*frame.request, frame.consumed)) {
+            return;
+        }
+
+        if (frame.state == rimau::http::Http1FrameState::header_complete) {
+            waiting_for_body_ = frame.waiting_for_body;
+            if (waiting_for_body_ && body_started_at_.time_since_epoch().count() == 0) {
+                body_started_at_ = std::chrono::steady_clock::now();
+            }
+            return;
+        }
+
+        request_buffer_.erase(0, frame.consumed);
+        waiting_for_body_ = false;
+        body_started_at_ = {};
         request_started_at_ = request_buffer_.empty() ? std::chrono::steady_clock::time_point {} : std::chrono::steady_clock::now();
-        process_request(std::move(raw_request));
+        process_request(std::move(frame.raw_request));
+    }
+
+    bool try_handle_websocket_upgrade(const rimau::http::Request& request, std::size_t consumed)
+    {
+        if (!is_websocket_upgrade_request(request)) {
+            return false;
+        }
+
+        request_buffer_.erase(0, std::min(request_buffer_.size(), consumed));
+        request_started_at_ = request_buffer_.empty() ? std::chrono::steady_clock::time_point {} : std::chrono::steady_clock::now();
+        if (security_state_ && !security_state_->allow_request(client_ip_, *config_)) {
+            set_response(rimau::http::text_response(429, "Too Many Requests\n"), rimau::http::BodyMode::include, false);
+            return true;
+        }
+        if (auto waf_response = inspect_waf(request)) {
+            set_response(std::move(*waf_response), rimau::http::BodyMode::include, false);
+            return true;
+        }
+        if (try_start_websocket_proxy(request)) {
+            return true;
+        }
+        ++requests_served_;
+        set_websocket_handshake_response(websocket_handshake_response(request));
+        return true;
     }
 
     bool process_http2_prior_knowledge()

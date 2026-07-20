@@ -34,7 +34,7 @@ Untuk setiap item:
 
 ## Phase 1: HTTP/1.1 Stabilization
 
-- [ ] Pisahkan HTTP/1.1 codec/session daripada `ClientConnection`.
+- [x] Pisahkan HTTP/1.1 codec/session daripada `ClientConnection`.
   - Done criteria: parsing/framing HTTP/1.1 boleh diuji tanpa socket event loop.
 - [ ] Tambah integration tests untuk keep-alive, max request cap, idle timeout, pipelining, chunked body, range, gzip, WebSocket echo, dan WebSocket proxy.
   - Done criteria: semua behavior utama HTTP/1.1 ada coverage automatik.

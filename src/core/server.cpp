@@ -4175,30 +4175,31 @@ private:
 struct RuntimeControl {
     std::atomic_bool shutdown_requested { false };
     std::atomic_bool worker_failed { false };
-    std::atomic<std::shared_ptr<const ServerConfig>> live_config;
-    std::atomic<std::shared_ptr<const TlsContext>> live_tls_context;
+    std::shared_ptr<const ServerConfig> live_config;
+    std::shared_ptr<const TlsContext> live_tls_context;
     std::atomic_uint64_t config_generation { 0 };
     SecurityState security;
 
     std::shared_ptr<const ServerConfig> config_snapshot() const
     {
-        return live_config.load(std::memory_order_acquire);
+        return std::atomic_load_explicit(&live_config, std::memory_order_acquire);
     }
 
     void publish_config(ServerConfig config)
     {
-        live_config.store(std::make_shared<ServerConfig>(std::move(config)), std::memory_order_release);
+        std::shared_ptr<const ServerConfig> next_config = std::make_shared<ServerConfig>(std::move(config));
+        std::atomic_store_explicit(&live_config, std::move(next_config), std::memory_order_release);
         config_generation.fetch_add(1, std::memory_order_release);
     }
 
     std::shared_ptr<const TlsContext> tls_context_snapshot() const
     {
-        return live_tls_context.load(std::memory_order_acquire);
+        return std::atomic_load_explicit(&live_tls_context, std::memory_order_acquire);
     }
 
     void publish_tls_context(std::shared_ptr<const TlsContext> tls_context)
     {
-        live_tls_context.store(std::move(tls_context), std::memory_order_release);
+        std::atomic_store_explicit(&live_tls_context, std::move(tls_context), std::memory_order_release);
     }
 };
 

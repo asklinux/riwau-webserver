@@ -1286,3 +1286,27 @@ Result:
 - Fast CI WAF executable passed.
 - Default fully static local build still passed.
 - Default local CTest passed, 12/12 tests.
+
+CI GCC 11 shared pointer atomic portability fix:
+
+- The GitHub Actions run for commit `7f7f0d5` passed configure and reached C++ compilation, then failed on Ubuntu 22.04 GCC/libstdc++ 11 because `std::atomic<std::shared_ptr<...>>` is not accepted there.
+- Changed `RuntimeControl` to store plain `std::shared_ptr<const ServerConfig>` and `std::shared_ptr<const TlsContext>` and use `std::atomic_load_explicit` / `std::atomic_store_explicit` for thread-safe publication.
+- This preserves the intended atomic shared-pointer publication model while supporting older libstdc++ used by the CI runner.
+
+Validation on 2026-07-20 after GCC 11 atomic shared pointer fix:
+
+```bash
+cmake --build build
+ctest --test-dir build --output-on-failure -R 'rimau_http1_network|rimau_protocol_capabilities'
+cmake -S . -B build-gcc11-local -G Ninja -DCMAKE_C_COMPILER=gcc-11 -DCMAKE_CXX_COMPILER=g++-11 -DRIMAU_ENABLE_TESTS=ON -DRIMAU_FULLY_STATIC_SERVER=OFF -DRIMAU_USE_BUNDLED_GLIBC=OFF
+cmake --build build-gcc11-local --target rimau_core
+ctest --test-dir build --output-on-failure
+```
+
+Result:
+
+- Default build passed; static glibc DNS/NSS linker warnings for `getaddrinfo`/OpenSSL `gethostbyname` remain.
+- Targeted CTest passed, 2/2 tests.
+- GCC 11 fast-path configure passed.
+- GCC 11 built `rimau_core` successfully.
+- Full default CTest passed, 12/12 tests.

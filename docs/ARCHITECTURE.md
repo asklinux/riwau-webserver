@@ -257,6 +257,8 @@ The default CMake path builds these bundled source dependencies:
 - Linux kernel source `6.18.7` UAPI headers through `make ARCH=x86_64 headers_install`.
 - GNU glibc `2.43` from GNU source into `build/_deps/glibc/sysroot`.
 
+`rimau_bundled_bison`, `rimau_bundled_linux_headers`, and `rimau_bundled_glibc` are excluded from the default `all` target unless `rimau-server` depends on `rimau_bundled_glibc` through `RIMAU_FULLY_STATIC_SERVER=ON` and `RIMAU_USE_BUNDLED_GLIBC=ON`. This keeps the GitHub Actions fast path from building glibc when it intentionally configures `RIMAU_FULLY_STATIC_SERVER=OFF` and `RIMAU_USE_BUNDLED_GLIBC=OFF`.
+
 For Linux x86_64 GNU/Clang builds, `rimau-server` links with:
 
 ```text

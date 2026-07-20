@@ -177,6 +177,7 @@ ExternalProject_Add(rimau_bundled_zlib
         "${RIMAU_ZLIB_INSTALL_DIR}/lib/libz.a")
 
 ExternalProject_Add(rimau_bundled_bison
+    EXCLUDE_FROM_ALL TRUE
     URL "${RIMAU_BISON_URL}"
     URL_HASH "SHA256=${RIMAU_BISON_SHA256}"
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
@@ -191,6 +192,7 @@ ExternalProject_Add(rimau_bundled_bison
         "${RIMAU_BISON_INSTALL_DIR}/bin/bison")
 
 ExternalProject_Add(rimau_bundled_linux_headers
+    EXCLUDE_FROM_ALL TRUE
     URL "${RIMAU_LINUX_HEADERS_URL}"
     URL_HASH "SHA256=${RIMAU_LINUX_HEADERS_SHA256}"
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE
@@ -209,6 +211,7 @@ ExternalProject_Add(rimau_bundled_linux_headers
         "${RIMAU_LINUX_HEADERS_INSTALL_DIR}/include/linux/errno.h")
 
 ExternalProject_Add(rimau_bundled_glibc
+    EXCLUDE_FROM_ALL TRUE
     URL "${RIMAU_GLIBC_URL}"
     URL_HASH "SHA256=${RIMAU_GLIBC_SHA256}"
     DOWNLOAD_EXTRACT_TIMESTAMP TRUE

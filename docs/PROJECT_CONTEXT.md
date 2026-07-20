@@ -386,7 +386,7 @@ Production deployment, service manager, packaging, container, TLS certificate ha
 - Worker pool berasaskan CPU core melalui `std::jthread`.
 - `SO_REUSEADDR`, `SO_REUSEPORT`, TCP keepalive, graceful SIGTERM/SIGINT shutdown, dan SIGHUP live reload terhad.
 - Fully static Linux x86_64 `rimau-server` build menggunakan bundled source glibc sysroot.
-- GitHub Actions workflow `.github/workflows/ci.yml` for fast Linux build/test with bundled OpenSSL, SQLite, and zlib; bundled glibc is disabled in CI fast path to avoid long PR feedback cycles.
+- GitHub Actions workflow `.github/workflows/ci.yml` for fast Linux build/test with bundled OpenSSL, SQLite, and zlib; bundled glibc is disabled and glibc-related ExternalProject targets are excluded from default `all` in CI fast path to avoid long PR feedback cycles.
 
 ## Current Implementation Status
 

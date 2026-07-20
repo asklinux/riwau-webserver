@@ -1253,3 +1253,36 @@ Result:
 - Full CTest passed, 12/12 tests.
 - Config check passed.
 - Protocol status command passed and reports HTTP/1.1 file-backed large-body spooling.
+
+CI bundled glibc fast-path fix:
+
+- The GitHub Actions run for commit `fa7b232` reached the runner and failed during build because `rimau_bundled_glibc` was still part of the default Ninja `all` build even when the workflow configured `RIMAU_USE_BUNDLED_GLIBC=OFF`.
+- Updated CMake so `rimau_bundled_bison`, `rimau_bundled_linux_headers`, and `rimau_bundled_glibc` are `EXCLUDE_FROM_ALL`.
+- Fully static default local builds still build bundled glibc because `rimau-server` depends on `rimau_bundled_glibc` when `RIMAU_FULLY_STATIC_SERVER=ON` and `RIMAU_USE_BUNDLED_GLIBC=ON`.
+- Fast CI builds with `RIMAU_FULLY_STATIC_SERVER=OFF` and `RIMAU_USE_BUNDLED_GLIBC=OFF` no longer schedule glibc, Bison, or Linux headers in default `all`.
+
+Validation on 2026-07-20 after CI bundled glibc fast-path fix:
+
+```bash
+cmake -S . -B build-ci-local -G Ninja -DRIMAU_ENABLE_TESTS=ON -DRIMAU_FULLY_STATIC_SERVER=OFF -DRIMAU_USE_BUNDLED_GLIBC=OFF
+ninja -C build-ci-local -n all | rg 'rimau_bundled_(glibc|bison|linux_headers)|_deps/glibc|_deps/bison|linux-headers' || true
+cmake --build build-ci-local
+ctest --test-dir build-ci-local --output-on-failure
+./build-ci-local/rimau-server --database build-ci-local/ci.sqlite3 --check-config
+./build-ci-local/rimau-server --database build-ci-local/ci.sqlite3 --protocols
+./build-ci-local/rimau-waf-tests
+cmake -S . -B build
+cmake --build build
+ctest --test-dir build --output-on-failure
+```
+
+Result:
+
+- Fast CI configure passed.
+- Dry-run default `all` did not schedule bundled glibc, bundled Bison, or bundled Linux headers.
+- Fast CI build passed.
+- Fast CI CTest passed, 12/12 tests.
+- Fast CI config/protocol smoke passed.
+- Fast CI WAF executable passed.
+- Default fully static local build still passed.
+- Default local CTest passed, 12/12 tests.

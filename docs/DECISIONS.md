@@ -583,6 +583,10 @@ Consequence:
 
 First build time is significantly longer and requires network access unless source archives are cached. Current validation shows `ldd build/rimau-server` reports `not a dynamic executable`, `file build/rimau-server` reports statically linked, and `readelf -l build/rimau-server` has no dynamic interpreter. glibc configure warns that `makeinfo` is missing, so some glibc documentation/tests are disabled on this machine. Static glibc still has a DNS/NSS caveat: linker warnings report that `getaddrinfo` and OpenSSL `gethostbyname` in statically linked applications can require matching glibc shared libraries/modules at runtime. Reverse proxy upstream hostnames therefore need dedicated production validation; literal IP upstreams avoid that specific hostname-resolution path. Needs verification.
 
+Note:
+
+GitHub Actions fast CI configures `RIMAU_FULLY_STATIC_SERVER=OFF` and `RIMAU_USE_BUNDLED_GLIBC=OFF`; glibc-related ExternalProject targets are excluded from default `all` and are only pulled into the build when the fully static server target depends on bundled glibc.
+
 ## ADR-0023: Add Native HTTP/2 And HTTP/3 Wire Codec Primitives First
 
 - Date: 2026-07-19

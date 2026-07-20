@@ -26,7 +26,7 @@ Untuk setiap item:
   - Done criteria: `.github/workflows/ci.yml` wujud dan local CMake configure dengan flag CI lulus.
 - [ ] Verify first GitHub Actions CI run.
   - Done criteria: GitHub Actions build CMake dan run CTest untuk PR/push selepas workflow dipush.
-  - Status: tunggu push/PR dan GitHub Actions run pertama lulus sebelum tanda `[x]`.
+  - Status: run `29716825738` reached hosted runner but failed because bundled glibc was still scheduled in the fast CI build. CMake now excludes glibc-related ExternalProject targets from default `all`; wait for the next pushed GitHub Actions run to pass before marking `[x]`.
 - [x] Tambah SQLite schema migration/version table.
   - Done criteria: config database mempunyai versioning dan test migration.
 - [x] Tambah CLI integration tests untuk `--database`, `--set`, `--check-config`, dan `--protocols`.
